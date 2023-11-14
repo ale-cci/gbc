@@ -15,9 +15,9 @@ struct CpuRegisters {
     pc: u16,
 }
 enum CFlag {
-    Z = 7, // zero
-    S = 6, // subtraction
-    H = 5, // half carry
+    Z = 7,  // zero
+    S = 6,  // subtraction
+    H = 5,  // half carry
     CY = 4, // carry
 }
 
@@ -180,7 +180,7 @@ impl Runtime<'_> {
                 1
             }
             0x05 => {
-                self.cpu.rb -= 1;
+                self.cpu.rb = self.cpu.rb.wrapping_sub(1u8);
                 self.cpu.set_flag(CFlag::Z, (self.cpu.rb == 0) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
                 1
@@ -564,12 +564,33 @@ impl Runtime<'_> {
         };
     }
 
+    fn boot_rom_disabled(&self) -> bool {
+        return self.get(0xFF50) == 1
+    }
     // RAM
-    fn get(&self, addr: u16) -> u8 {
+    pub fn get(&self, addr: u16) -> u8 {
         return match addr {
-            0x0000..=0x00FF => self.bootstrap[(addr - 0x000) as usize],
-            0x0100..=0x3FFF => self.rom[(addr - 0x0100) as usize],
-            0x4000..=0x7FFF => self.rom[(addr - 0x0100) as usize],
+            0x0000..=0x00FF => {
+                if self.boot_rom_disabled() {
+                    self.rom[addr as usize]
+                } else {
+                    self.bootstrap[(addr - 0x000) as usize]
+                }
+            }
+            0x0100..=0x3FFF => {
+                if self.boot_rom_disabled() {
+                    self.rom[addr as usize]
+                } else {
+                    self.rom[(addr - 0x100) as usize]
+                }
+            }
+            0x4000..=0x7FFF => {
+                if self.boot_rom_disabled() {
+                    self.rom[addr as usize]
+                } else {
+                    self.rom[(addr - 0x0100) as usize]
+                }
+            }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize],
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
             _ => {
@@ -613,7 +634,6 @@ impl Runtime<'_> {
         return join_u8(h, l);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
