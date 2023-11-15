@@ -11,6 +11,8 @@ use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
 use std::time::Duration;
+mod byteop;
+use crate::byteop::*;
 
 fn load_rom(filename: &str) -> Vec<u8> {
     let mut f = fs::File::open(filename).expect(&format!(
@@ -24,10 +26,6 @@ fn load_rom(filename: &str) -> Vec<u8> {
     let mut rom = vec![0; meta.len() as usize];
     f.read(&mut rom).expect("Overflow");
     return rom;
-}
-
-fn get_bit(reg: u8, pos: u8) -> u8 {
-    return (reg & (1 << pos)) >> pos;
 }
 
 #[derive(Debug)]
@@ -88,11 +86,16 @@ impl PPU {
     fn new() -> PPU {
         PPU {
             x: 0,
-            r_control: 0, r_status: 0,
-            scx: 0, scy: 0,
-            ly: 0, lyc: 0,
-            obp0: 0, obp1: 0,
-            wx: 0, wy: 0,
+            r_control: 0,
+            r_status: 0,
+            scx: 0,
+            scy: 0,
+            ly: 0,
+            lyc: 0,
+            obp0: 0,
+            obp1: 0,
+            wx: 0,
+            wy: 0,
             window_line_counter: 0,
         }
     }
@@ -109,50 +112,67 @@ impl PPU {
     fn update(&mut self, rt: &runtime::Runtime) {
         self.r_control = rt.get(0xFF40);
         self.r_status = rt.get(0xFF41);
-        self.scx = rt.get(0xFF42);
-        self.scy = rt.get(0xFF43);
+        self.scy = rt.get(0xFF42);
+        self.scx = rt.get(0xFF43);
         self.ly = rt.get(0xFF44);
         self.lyc = rt.get(0xFF45); // 0..=153
         self.obp0 = rt.get(0xFF48);
         self.obp1 = rt.get(0xFF49);
-        self.wx = rt.get(0xFF4A);
-        self.wy = rt.get(0xFF4B);
+        self.wy = rt.get(0xFF4A);
+        self.wx = rt.get(0xFF4B);
     }
 
     // render background
     fn render(&mut self, rt: &mut runtime::Runtime, canvas: &mut Canvas<sdl2::video::Window>) {
-        let coord_x = (self.scx as u16 / 8 + self.x as u16) & 0x1f;
-        let coord_y = (self.ly as u16 + self.scy as u16 / 8) & 0x1f;
+        let coord_x = (self.scx as u16 & 7 + self.x as u16) * 8;
+        let coord_y = (self.ly as u16 + self.scy as u16) & 0xff;
 
-        let tile_no = (coord_y * 32u16 + coord_x) & 0x3ff;
-        let fst = rt.get(self.bg_offset() + tile_no);
-        let snd = rt.get(self.bg_offset() + tile_no);
+        let tile_voff = (coord_y & 0b111) * 32* 2;
+        let tile_line = (coord_y >> 3);
+
+        let tile_no = (self.x as u16 + tile_voff) + tile_line;
+
+//         println!(
+//             "scx: {}, scy: {}, wx: {}, wy: {}",
+//             self.scx, self.scy, self.wx, self.wy
+//         );
+
+        // let tile_no = (coord_y / 8 + coord_x) & 0x3ff;
+        let tile_addr = (2* tile_no ) &0x3ff;
+        let fst = rt.get(self.bg_offset() + tile_addr);
+        let snd = rt.get(self.bg_offset() + tile_addr + 1);
 
         for i in 0..8 {
-            let h = get_bit(snd, i);
             let l = get_bit(fst, i);
+            let h = get_bit(snd, i);
             let color = (h << 1) + l;
+            // println!("Col: {} {}", tile_no, color);
 
             canvas.set_draw_color(self.get_color(color));
-            canvas.fill_rect(Rect::new(self.x.into(), self.ly.into(), 1, 1)).unwrap();
+            canvas
+                .fill_rect(Rect::new((self.x + i).into(), self.ly.into(), 1, 1))
+                .unwrap();
         }
-        self.ly += 1;
-        if self.ly > 153 {
-            self.ly = 0;
+
+        self.x += 1;
+        if self.x == 20 {
+            self.x = 0; // hblank
+            self.ly += 1;
+            if self.ly > 153 {
+                self.ly = 0;
+            }
         }
         rt.set(0xFF44, self.ly);
     }
 
-
     fn bg_offset(&self) -> u16 {
-        return if get_bit(self.r_control, 3) == 1 {
-            0x9C00
-        } else {
+        return if get_bit(self.r_control, 3) == 0 {
             0x9800
+        } else {
+            0x9C00
         };
     }
 }
-
 
 fn main() {
     let game_rom = load_rom("Tetris.gb");
@@ -192,7 +212,7 @@ fn main() {
 
         canvas.present();
 
-        let tick = 1_000_000_000u32 / 60;
+        let tick = 1_000_000_000u32 / 419000000;
         ::std::thread::sleep(Duration::new(0, tick));
     }
 }

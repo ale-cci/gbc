@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::mem::size_of;
+use crate::byteop::*;
 
 #[derive(Debug)]
 struct CpuRegisters {
@@ -23,18 +24,16 @@ enum CFlag {
 
 impl CpuRegisters {
     fn set_flag(&mut self, flag: CFlag, val: u8) {
-        let val_bool = val == 0;
-        let pos = flag as u8;
+        let mask: u8 = 1 << flag as u8;
 
-        if val_bool {
-            self.rf |= (1 << pos) as u8;
+        if val == 1 {
+            self.rf |= mask;
         } else {
-            self.rf &= !(1 << pos);
+            self.rf &= !mask;
         }
     }
     fn get_flag(&self, flag: CFlag) -> u8 {
-        let pos = flag as u8;
-        (self.rf & (1 << pos)) >> pos
+        return get_bit(self.rf, flag as u8);
     }
 
     fn bc(&self) -> u16 {
@@ -78,17 +77,6 @@ fn repr(byte: &u8) -> String {
 
     return format!("{}{}", b_repr(top), b_repr(btm));
 }
-
-fn join_u8(h: u8, l: u8) -> u16 {
-    return ((h as u16) << 8) + l as u16;
-}
-
-fn split_u16(hl: u16) -> (u8, u8) {
-    let l = (hl & 0b11111111) as u8;
-    let h = (hl >> 8) as u8;
-    return (h, l);
-}
-
 fn b64<T: Into<u16>>(arg: T) -> String {
     let iter = std::mem::size_of::<T>();
     let mut chars = vec![];
@@ -336,11 +324,7 @@ impl Runtime<'_> {
             0x32 => {
                 let hl = self.cpu.hl();
                 self.set(hl, self.cpu.ra);
-
-                let (h, l) = split_u16(hl - 1);
-
-                self.cpu.rh = h;
-                self.cpu.rl = l;
+                self.cpu.set_hl(hl -1);
                 2
             }
             0x3E => {
@@ -553,8 +537,11 @@ impl Runtime<'_> {
                 2
             }
             0x7C => {
-                let msb = self.cpu.rh as u8 >> 7;
+                let msb = get_bit(self.cpu.rh, 7);
+                println!("Val: {:b} - {}", self.cpu.rh, msb);
                 self.cpu.set_flag(CFlag::Z, msb ^ 0b1);
+                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::H, 1);
                 2
             }
 
@@ -604,7 +591,13 @@ impl Runtime<'_> {
             0x0000..=0x3FFF => {
                 panic!("Write on RO memory ({}): {}", b64(addr), b64(val));
             }
-            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
+            0x7FFF => {
+                panic!("DANGER!");
+            }
+            0x8000..=0x9FFF => {
+                println!("Setting memory region {}", b64(addr));
+                self.vram[(addr - 0x8000) as usize] = val
+            },
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
             _ => {
                 // panic!("Access to unknown memory region {}", addr)
