@@ -599,7 +599,7 @@ impl Runtime<'_> {
         };
     }
 
-    fn set(&mut self, addr: u16, val: u8) -> () {
+    pub fn set(&mut self, addr: u16, val: u8) -> () {
         match addr {
             0x0000..=0x3FFF => {
                 panic!("Write on RO memory ({}): {}", b64(addr), b64(val));
