@@ -314,6 +314,10 @@ impl Runtime<'_> {
                     2
                 }
             }
+            0x2E => {
+                self.cpu.rl = self.next_opcode();
+                2
+            }
             0x31 => {
                 // jr nc, s8
                 let b0 = self.next_opcode();
