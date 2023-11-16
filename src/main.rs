@@ -124,20 +124,13 @@ impl PPU {
 
     // render background
     fn render(&mut self, rt: &mut runtime::Runtime, canvas: &mut Canvas<sdl2::video::Window>) {
-        let coord_x = (self.scx as u16 & 7 + self.x as u16) * 8;
         let coord_y = (self.ly as u16 + self.scy as u16) & 0xff;
 
         let tile_voff = (coord_y & 0b111) * 32* 2;
-        let tile_line = (coord_y >> 3);
+        let tile_line = coord_y >> 3;
 
         let tile_no = (self.x as u16 + tile_voff) + tile_line;
 
-//         println!(
-//             "scx: {}, scy: {}, wx: {}, wy: {}",
-//             self.scx, self.scy, self.wx, self.wy
-//         );
-
-        // let tile_no = (coord_y / 8 + coord_x) & 0x3ff;
         let tile_addr = (2* tile_no ) &0x3ff;
         let fst = rt.get(self.bg_offset() + tile_addr);
         let snd = rt.get(self.bg_offset() + tile_addr + 1);
@@ -146,7 +139,6 @@ impl PPU {
             let l = get_bit(fst, i);
             let h = get_bit(snd, i);
             let color = (h << 1) + l;
-            // println!("Col: {} {}", tile_no, color);
 
             canvas.set_draw_color(self.get_color(color));
             canvas
@@ -162,7 +154,13 @@ impl PPU {
                 self.ly = 0;
             }
         }
+        // rt.set()
+
         rt.set(0xFF44, self.ly);
+
+        let r_status = set_bit(self.r_status, 2, self.ly == self.lyc);
+        // r_status 1-0: ppu mode
+        rt.set(0xFF41, r_status);
     }
 
     fn bg_offset(&self) -> u16 {

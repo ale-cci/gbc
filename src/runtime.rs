@@ -24,13 +24,7 @@ enum CFlag {
 
 impl CpuRegisters {
     fn set_flag(&mut self, flag: CFlag, val: u8) {
-        let mask: u8 = 1 << flag as u8;
-
-        if val == 1 {
-            self.rf |= mask;
-        } else {
-            self.rf &= !mask;
-        }
+        self.rf = set_bit(self.rf, flag as u8, val == 1);
     }
     fn get_flag(&self, flag: CFlag) -> u8 {
         return get_bit(self.rf, flag as u8);
@@ -62,39 +56,6 @@ impl CpuRegisters {
         self.rh = h;
         self.rl = l;
     }
-}
-
-fn b_repr(byte: u8) -> char {
-    if byte <= 9 {
-        return (byte + '0' as u8) as char;
-    }
-    return (byte - 10 + ('A' as u8)) as char;
-}
-
-fn repr(byte: &u8) -> String {
-    let btm = byte & 0b00001111;
-    let top = (byte & 0b11110000) >> 4;
-
-    return format!("{}{}", b_repr(top), b_repr(btm));
-}
-fn b64<T: Into<u16>>(arg: T) -> String {
-    let iter = std::mem::size_of::<T>();
-    let mut chars = vec![];
-
-    let mut num = arg.into() as u16;
-    for _ in 0..iter {
-        let l = b_repr((num as u8) & 0b00001111);
-        chars.push(l);
-        let h = b_repr((num as u8 & 0b11110000) >> 4);
-        chars.push(h);
-
-        num >>= 8;
-    }
-
-    chars.push('x');
-    chars.push('0');
-
-    return String::from_iter(chars.into_iter().rev());
 }
 
 pub struct Runtime<'a> {
@@ -138,9 +99,9 @@ impl Runtime<'_> {
             panic!("YEY");
         }
         println!(
-            "{} - Opcode 0x{}: {:?}",
+            "{} - Opcode {}: {:?}",
             b64(self.cpu.pc),
-            repr(&self.get(self.cpu.pc)),
+            b64(self.get(self.cpu.pc)),
             self.cpu
         );
         let opcode = self.next_opcode();
@@ -527,7 +488,7 @@ impl Runtime<'_> {
                 2
             }
             _ => {
-                panic!("ERROR: Opcode 0x{} not implemented!", repr(&opcode));
+                panic!("ERROR: Opcode 0x{} not implemented!", b64(opcode));
             }
         };
     }
@@ -550,7 +511,7 @@ impl Runtime<'_> {
             }
 
             _ => {
-                panic!("ERROR: Opcode CB{} not implemented", repr(&opcode));
+                panic!("ERROR: Opcode CB{} not implemented", b64(opcode));
             }
         };
     }
