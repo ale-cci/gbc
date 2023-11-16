@@ -129,7 +129,7 @@ impl Runtime<'_> {
                 1
             }
             0x05 => {
-                self.cpu.rb = self.cpu.rb.wrapping_sub(1u8);
+                self.cpu.rb -= 1;
                 self.cpu.set_flag(CFlag::Z, (self.cpu.rb == 0) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
                 1
@@ -484,7 +484,6 @@ impl Runtime<'_> {
                 let imm = self.next_opcode();
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == imm) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
-
                 2
             }
             _ => {
@@ -503,7 +502,6 @@ impl Runtime<'_> {
             }
             0x7C => {
                 let msb = get_bit(self.cpu.rh, 7);
-                println!("Val: {:b} - {}", self.cpu.rh, msb);
                 self.cpu.set_flag(CFlag::Z, msb ^ 0b1);
                 self.cpu.set_flag(CFlag::S, 0);
                 self.cpu.set_flag(CFlag::H, 1);

@@ -80,6 +80,7 @@ struct PPU {
     wy: u8,
 
     window_line_counter: u8,
+    remaining_cycles: u8,
 }
 
 impl PPU {
@@ -97,6 +98,7 @@ impl PPU {
             wx: 0,
             wy: 0,
             window_line_counter: 0,
+            remaining_cycles: 0,
         }
     }
     fn get_color(&self, id: u8) -> Color {
@@ -123,15 +125,24 @@ impl PPU {
     }
 
     // render background
-    fn render(&mut self, rt: &mut runtime::Runtime, canvas: &mut Canvas<sdl2::video::Window>) {
+    fn render(&mut self, e_cpu: u8, rt: &mut runtime::Runtime, display: &mut Display) {
+        if self.remaining_cycles <= e_cpu {
+            self.remaining_cycles = 0;
+        } else {
+            self.remaining_cycles -= e_cpu;
+        }
+        if self.remaining_cycles != 0 {
+            return;
+        }
+
         let coord_y = (self.ly as u16 + self.scy as u16) & 0xff;
 
-        let tile_voff = (coord_y & 0b111) * 32* 2;
+        let tile_voff = (coord_y & 0b111) * 32 * 2;
         let tile_line = coord_y >> 3;
 
         let tile_no = (self.x as u16 + tile_voff) + tile_line;
 
-        let tile_addr = (2* tile_no ) &0x3ff;
+        let tile_addr = (2 * tile_no) & 0x3ff;
         let fst = rt.get(self.bg_offset() + tile_addr);
         let snd = rt.get(self.bg_offset() + tile_addr + 1);
 
@@ -140,27 +151,37 @@ impl PPU {
             let h = get_bit(snd, i);
             let color = (h << 1) + l;
 
-            canvas.set_draw_color(self.get_color(color));
-            canvas
-                .fill_rect(Rect::new((self.x + i).into(), self.ly.into(), 1, 1))
-                .unwrap();
+            display.set_pixel(self.x * 8+ i, self.ly, self.get_color(color));
         }
 
         self.x += 1;
         if self.x == 20 {
             self.x = 0; // hblank
             self.ly += 1;
+
+            let vblank = self.ly >= 144;
+            let interrupt_flag = rt.get(0xFF0F);
+            rt.set(0xFF0F, set_bit(interrupt_flag, 0, vblank));
+
             if self.ly > 153 {
                 self.ly = 0;
             }
         }
         // rt.set()
 
-        rt.set(0xFF44, self.ly);
+        let mut r_status = self.r_status;
+        if self.ly == self.lyc {
+            if get_bit(self.r_status, 6) == 1 {
+                // LYC int select Trigger interrupt if
+                let ie = rt.get(0xFFFF);
+                rt.set(0xFFFF, set_bit(ie, 0, true));
+            }
+            r_status = set_bit(r_status, 2, true);
+        }
 
-        let r_status = set_bit(self.r_status, 2, self.ly == self.lyc);
         // r_status 1-0: ppu mode
         rt.set(0xFF41, r_status);
+        rt.set(0xFF44, self.ly);
     }
 
     fn bg_offset(&self) -> u16 {
@@ -169,6 +190,48 @@ impl PPU {
         } else {
             0x9C00
         };
+    }
+}
+struct Display {
+    pixels: Vec<Color>,
+    width: u8,
+    height: u8,
+    scale: u8,
+}
+impl Display {
+    fn new() -> Display {
+        Display {
+            pixels: vec![Color::RGB(255, 255, 255); 160 * 144],
+            width: 160,
+            height: 144,
+            scale: 1,
+        }
+    }
+    fn set_pixel(&mut self, x: u8, y: u8, c: Color) {
+        let addr = y as usize * self.width as usize + x as usize;
+        if addr < self.width as usize * self.height as usize {
+            self.pixels[addr] = c;
+        }
+    }
+    fn get_pixel(&self, x: u8, y: u8) -> Color {
+        let addr = y as usize * self.width as usize + x as usize;
+        return self.pixels[addr];
+    }
+    fn render(&self, canvas: &mut Canvas<sdl2::video::Window>) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let color = self.get_pixel(x, y);
+                canvas.set_draw_color(color);
+                canvas
+                    .fill_rect(Rect::new(
+                        x as i32 * self.scale as i32,
+                        y as i32 * self.scale as i32,
+                        (self.scale).into(),
+                        (self.scale).into(),
+                    ))
+                    .unwrap();
+            }
+        }
     }
 }
 
@@ -185,6 +248,7 @@ fn main() {
         .position_centered()
         .build()
         .unwrap();
+    let mut display = Display::new();
     let mut canvas = window.into_canvas().build().unwrap();
 
     canvas.set_draw_color(Color::RGB(255, 255, 255));
@@ -206,11 +270,11 @@ fn main() {
             }
         }
         ppu.update(&rt);
-        ppu.render(&mut rt, &mut canvas);
+        ppu.render(cc, &mut rt, &mut display);
 
+        display.render(&mut canvas);
         canvas.present();
-
-        let tick = 1_000_000_000u32 / 419000000;
+        let tick = 1_000_000_000u32 / 419_000_000;
         ::std::thread::sleep(Duration::new(0, tick));
     }
 }
