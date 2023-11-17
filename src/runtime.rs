@@ -95,9 +95,6 @@ impl Runtime<'_> {
     }
 
     pub fn tick(&mut self) -> u8 {
-        if self.cpu.pc == 0x2817 {
-            panic!("YEY");
-        }
         println!(
             "{} - Opcode {}: {:?}",
             b64(self.cpu.pc),
@@ -128,8 +125,8 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::S, 0);
                 1
             }
-            0x05 => {
-                self.cpu.rb -= 1;
+            0x05 => { // DEC B
+                self.cpu.rb = self.cpu.rb.wrapping_sub(1);
                 self.cpu.set_flag(CFlag::Z, (self.cpu.rb == 0) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
                 1
@@ -189,7 +186,7 @@ impl Runtime<'_> {
                 self.set(self.cpu.de(), self.cpu.ra);
                 2
             }
-            0x13 => {
+            0x13 => { // INC DE
                 self.cpu.set_de(self.cpu.de() + 1);
                 2
             }
@@ -207,11 +204,14 @@ impl Runtime<'_> {
                 self.cpu.rd = self.next_opcode();
                 2
             }
-            0x17 => {
-                let msb = (self.cpu.ra & (1 << 7)) >> 7;
+            0x17 => { // RLA 
+                let msb = get_bit(self.cpu.ra, 7);
 
-                self.cpu.ra = self.cpu.ra << 1 + self.cpu.get_flag(CFlag::CY);
+                self.cpu.ra = (self.cpu.ra << 1) + self.cpu.get_flag(CFlag::CY);
                 self.cpu.set_flag(CFlag::CY, msb);
+                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::H, 0);
+                self.cpu.set_flag(CFlag::Z, 0);
                 1
             }
             0x18 => {
@@ -251,12 +251,12 @@ impl Runtime<'_> {
                 self.cpu.rh = self.next_opcode();
                 3
             }
-            0x22 => {
+            0x22 => { // LD (HL+), A
                 self.set(self.cpu.hl(), self.cpu.ra);
                 self.cpu.set_hl(self.cpu.hl() + 1);
                 2
             }
-            0x23 => {
+            0x23 => { // INC HL
                 self.cpu.set_hl(self.cpu.hl() + 1);
                 2
             }
@@ -366,7 +366,7 @@ impl Runtime<'_> {
                 self.cpu.ra = self.cpu.rd;
                 1
             }
-            0x7B => {
+            0x7B => { // LD A, E
                 self.cpu.ra = self.cpu.re;
                 1
             }
@@ -426,7 +426,7 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::S, 1);
                 2
             }
-            0xC1 => {
+            0xC1 => { // POP BC
                 self.cpu.rc = self.stack_pop();
                 self.cpu.rb = self.stack_pop();
                 3
@@ -437,7 +437,7 @@ impl Runtime<'_> {
                 self.cpu.pc = join_u8(h, l);
                 4
             }
-            0xC5 => {
+            0xC5 => { // PUSH BC
                 self.stack_push_u16(self.cpu.bc());
                 4
             }
@@ -450,7 +450,7 @@ impl Runtime<'_> {
                 self.eval_cb(opnext)
             }
             0xCD => {
-                // call u16
+                // CALL a16
                 let l = self.next_opcode();
                 let h = self.next_opcode();
                 self.stack_push_u16(self.cpu.pc); // save PC to the stack
@@ -493,11 +493,13 @@ impl Runtime<'_> {
     }
 
     fn eval_cb(&mut self, opcode: u8) -> u8 {
-        println!("CB: {}", b64(opcode));
         return match opcode {
             0x11 => {
                 let c = self.cpu.rc;
-                self.cpu.rc = (c << 1) + self.cpu.get_flag(CFlag::CY);
+                self.cpu.rc = (c << 1) as u8 + self.cpu.get_flag(CFlag::CY);
+                self.cpu.set_flag(CFlag::CY, get_bit(c, 7));
+                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::H, 0);
                 2
             }
             0x7C => {
@@ -524,24 +526,18 @@ impl Runtime<'_> {
                 if self.boot_rom_disabled() {
                     self.rom[addr as usize]
                 } else {
-                    self.bootstrap[(addr - 0x000) as usize]
+                    self.bootstrap[addr as usize]
                 }
             }
             0x0100..=0x3FFF => {
-                if self.boot_rom_disabled() {
-                    self.rom[addr as usize]
-                } else {
-                    self.rom[(addr - 0x100) as usize]
-                }
+                self.rom[addr as usize]
             }
             0x4000..=0x7FFF => {
-                if self.boot_rom_disabled() {
-                    self.rom[addr as usize]
-                } else {
-                    self.rom[(addr - 0x0100) as usize]
-                }
+                self.rom[addr as usize]
             }
-            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize],
+            0x8000..=0x9FFF => {
+                self.vram[(addr - 0x8000) as usize]
+            },
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
             _ => {
                 panic!("Memory access out of bounds! {}", b64(addr));
