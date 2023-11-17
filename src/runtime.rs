@@ -494,7 +494,6 @@ impl Runtime<'_> {
     }
 
     fn eval_cb(&mut self, opcode: u8) -> u8 {
-        println!("CB: {}", b64(opcode));
         return match opcode {
             0x11 => {
                 let c = self.cpu.rc;
@@ -503,7 +502,6 @@ impl Runtime<'_> {
             }
             0x7C => {
                 let msb = get_bit(self.cpu.rh, 7);
-                println!("Val: {:b} - {}", self.cpu.rh, msb);
                 self.cpu.set_flag(CFlag::Z, msb ^ 0b1);
                 self.cpu.set_flag(CFlag::S, 0);
                 self.cpu.set_flag(CFlag::H, 1);

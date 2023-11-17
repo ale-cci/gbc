@@ -13,6 +13,8 @@ use sdl2::render::Canvas;
 use std::time::Duration;
 mod byteop;
 use crate::byteop::*;
+use std::thread;
+use std::time;
 
 fn load_rom(filename: &str) -> Vec<u8> {
     let mut f = fs::File::open(filename).expect(&format!(
@@ -34,6 +36,49 @@ struct Sprite {
     y: u8,
     tile: u8,
     _flags: u8,
+}
+
+struct Display {
+    pixels: Vec<Color>,
+    width: u8,
+    height: u8,
+}
+
+impl Display {
+    fn from(canvas: &Canvas<sdl2::video::Window>) -> Display {
+        let (width, height) = canvas.window().drawable_size();
+
+        let size = width as usize * height as usize;
+        Display {
+            pixels: vec![Color::RGB(0, 0, 0); size],
+            width: width as u8,
+            height: height as u8,
+        }
+    }
+
+    fn get_pixel(&self, x: u8, y: u8) -> Color {
+        let addr = x as usize + y as usize * self.width as usize;
+        return self.pixels[addr];
+    }
+
+    fn set_pixel(&mut self, x: u8, y: u8, color: Color) {
+        let addr = x as usize + y as usize * self.width as usize;
+        let max_addr = x as usize * y as usize;
+
+        if addr < max_addr {
+            self.pixels[addr] = color;
+        }
+    }
+
+    fn render(&mut self, canvas: &mut Canvas<sdl2::video::Window>) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                canvas.set_draw_color(self.get_pixel(x, y));
+                let rect = Rect::new(x as i32, y as i32, 1, 1);
+                canvas.fill_rect(rect).unwrap();
+            }
+        }
+    }
 }
 
 impl Sprite {
@@ -123,15 +168,15 @@ impl PPU {
     }
 
     // render background
-    fn render(&mut self, rt: &mut runtime::Runtime, canvas: &mut Canvas<sdl2::video::Window>) {
+    fn render(&mut self, rt: &mut runtime::Runtime, display: &mut Display) {
         let coord_y = (self.ly as u16 + self.scy as u16) & 0xff;
 
-        let tile_voff = (coord_y & 0b111) * 32* 2;
+        let tile_voff = (coord_y & 0b111) * 32 * 2;
         let tile_line = coord_y >> 3;
 
         let tile_no = (self.x as u16 + tile_voff) + tile_line;
 
-        let tile_addr = (2* tile_no ) &0x3ff;
+        let tile_addr = (2 * tile_no) & 0x3ff;
         let fst = rt.get(self.bg_offset() + tile_addr);
         let snd = rt.get(self.bg_offset() + tile_addr + 1);
 
@@ -140,10 +185,10 @@ impl PPU {
             let h = get_bit(snd, i);
             let color = (h << 1) + l;
 
-            canvas.set_draw_color(self.get_color(color));
-            canvas
-                .fill_rect(Rect::new((self.x + i).into(), self.ly.into(), 1, 1))
-                .unwrap();
+            let x = self.x * 8 + i;
+            let y = self.ly;
+
+            display.set_pixel(x, y, self.get_color(color));
         }
 
         self.x += 1;
@@ -156,11 +201,11 @@ impl PPU {
         }
         // rt.set()
 
-        rt.set(0xFF44, self.ly);
-
         let r_status = set_bit(self.r_status, 2, self.ly == self.lyc);
         // r_status 1-0: ppu mode
+
         rt.set(0xFF41, r_status);
+        rt.set(0xFF44, self.ly);
     }
 
     fn bg_offset(&self) -> u16 {
@@ -180,21 +225,28 @@ fn main() {
 
     let sdl_context = sdl2::init().unwrap();
     let video = sdl_context.video().unwrap();
+    let width = 160;
+    let height = 144;
+    let scale = 1;
+
     let window = video
-        .window("gbc", 160, 144)
+        .window("gbc", width, height)
         .position_centered()
         .build()
         .unwrap();
+
     let mut canvas = window.into_canvas().build().unwrap();
+    let mut display = Display::from(&canvas);
 
     canvas.set_draw_color(Color::RGB(255, 255, 255));
     let mut event_pump = sdl_context.event_pump().unwrap();
 
     let mut ppu = PPU::new();
-    'running: loop {
-        canvas.clear();
-        let cc = rt.tick();
 
+    let refresh_target = time::Duration::from_micros(10000000 / 60);
+    let mut ft = time::Instant::now();
+
+    'running: loop {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. }
@@ -205,12 +257,19 @@ fn main() {
                 _ => {}
             }
         }
-        ppu.update(&rt);
-        ppu.render(&mut rt, &mut canvas);
 
-        canvas.present();
+        let cc = rt.tick();
+        for _ in 0..cc {
+            ppu.update(&rt);
+            ppu.render(&mut rt, &mut display);
+        }
 
-        let tick = 1_000_000_000u32 / 419000000;
-        ::std::thread::sleep(Duration::new(0, tick));
+        // Refresh 60fps
+        if ft.elapsed() > refresh_target {
+            ft = time::Instant::now();
+            canvas.clear();
+            display.render(&mut canvas);
+            canvas.present();
+        }
     }
 }
