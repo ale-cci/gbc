@@ -14,6 +14,8 @@ struct CpuRegisters {
     rl: u8,
     sp: u16,
     pc: u16,
+
+    ime: bool,
 }
 enum CFlag {
     Z = 7,  // zero
@@ -80,6 +82,7 @@ impl Runtime<'_> {
                 rl: 0,
                 pc: 0,
                 sp: 0,
+                ime: false,
             },
             rom,
             bootstrap,
@@ -279,20 +282,24 @@ impl Runtime<'_> {
                 self.cpu.rl = self.next_opcode();
                 2
             }
-            0x31 => {
-                // jr nc, s8
-                let b0 = self.next_opcode();
-                let b1 = self.next_opcode();
-                self.cpu.sp = ((b1 as u16) << 8) + (b0 as u16);
+            0x31 => { // LD SP, d16
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+                self.cpu.sp = join_u8(h, l);
                 3
             }
             0x32 => {
                 let hl = self.cpu.hl();
                 self.set(hl, self.cpu.ra);
-                self.cpu.set_hl(hl -1);
+                self.cpu.set_hl(hl - 1);
                 2
             }
-            0x3E => {
+            0x36 => {
+                let val = self.next_opcode();
+                self.set(self.cpu.hl(), val);
+                3
+            }
+            0x3E => { // LD A, d8
                 self.cpu.ra = self.next_opcode();
                 2
             }
@@ -395,7 +402,7 @@ impl Runtime<'_> {
             //     1
             // }
             0x86 => {
-                self.cpu.ra = self.get(self.cpu.hl()) + self.cpu.ra;
+                self.cpu.ra = self.get(self.cpu.hl()).wrapping_add(self.cpu.ra);
                 self.cpu.set_flag(CFlag::S, 0);
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
                 2
@@ -472,6 +479,7 @@ impl Runtime<'_> {
                 let l = self.next_opcode();
                 let h = self.next_opcode();
                 let addr = join_u8(h, l);
+                println!("{} {}", h, l);
                 self.set(addr, self.cpu.ra);
                 4
             }
@@ -479,6 +487,10 @@ impl Runtime<'_> {
                 let addr = 0xFF00 + self.next_opcode() as u16;
                 self.cpu.ra = self.get(addr);
                 3
+            }
+            0xF3 => { // DI
+                self.cpu.ime = false;
+                1
             }
             0xFE => {
                 let imm = self.next_opcode();
