@@ -47,6 +47,7 @@ struct Display {
 impl Display {
     fn from(canvas: &Canvas<sdl2::video::Window>) -> Display {
         let (width, height) = canvas.window().drawable_size();
+        println!("Canvas: {} x {}", width, height);
 
         let size = width as usize * height as usize;
         Display {
@@ -63,7 +64,7 @@ impl Display {
 
     fn set_pixel(&mut self, x: u8, y: u8, color: Color) {
         let addr = x as usize + y as usize * self.width as usize;
-        let max_addr = x as usize * y as usize;
+        let max_addr = self.width as usize * self.height as usize;
 
         if addr < max_addr {
             self.pixels[addr] = color;
@@ -127,6 +128,22 @@ struct PPU {
     window_line_counter: u8,
 }
 
+fn get_tile_addr(x: u8, scx: u8, ly: u8, scy: u8) -> u16 {
+    let ly = ly as u16;
+    let x = x as u16;
+    let scy = scy as u16;
+    let scx = scx as u16;
+
+    let intratile = (scy + ly) & 0b111;
+    let tile_x = (x + scx) % 32;
+    let tile_y = ((scy + ly) >> 3) % 32;
+    println!("Intra: {}", intratile);
+    println!("TX: {}, TY: {}", tile_x, tile_y);
+
+    let tile_no = (tile_x + tile_y * 32) * 8 + intratile;
+    return tile_no * 2;
+}
+
 impl PPU {
     fn new() -> PPU {
         PPU {
@@ -169,14 +186,8 @@ impl PPU {
 
     // render background
     fn render(&mut self, rt: &mut runtime::Runtime, display: &mut Display) {
-        let coord_y = (self.ly as u16 + self.scy as u16) & 0xff;
+        let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
 
-        let tile_voff = (coord_y & 0b111) * 32 * 2;
-        let tile_line = coord_y >> 3;
-
-        let tile_no = (self.x as u16 + tile_voff) + tile_line;
-
-        let tile_addr = (2 * tile_no) & 0x3ff;
         let fst = rt.get(self.bg_offset() + tile_addr);
         let snd = rt.get(self.bg_offset() + tile_addr + 1);
 
@@ -202,7 +213,10 @@ impl PPU {
         // rt.set()
 
         let r_status = set_bit(self.r_status, 2, self.ly == self.lyc);
-        // r_status 1-0: ppu mode
+        if get_bit(r_status, 6) == 1 && self.ly == self.lyc {
+            // interrupt
+        }
+
 
         rt.set(0xFF41, r_status);
         rt.set(0xFF44, self.ly);
@@ -227,7 +241,6 @@ fn main() {
     let video = sdl_context.video().unwrap();
     let width = 160;
     let height = 144;
-    let scale = 1;
 
     let window = video
         .window("gbc", width, height)
@@ -266,10 +279,68 @@ fn main() {
 
         // Refresh 60fps
         if ft.elapsed() > refresh_target {
-            ft = time::Instant::now();
             canvas.clear();
+            ft = time::Instant::now();
             display.render(&mut canvas);
             canvas.present();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_get_tile_addr() {
+        let got = get_tile_addr(0, 0, 0, 0);
+        assert_eq!(got, 0);
+    }
+
+    #[test]
+    fn test_moves_in_x() {
+        let got = get_tile_addr(1, 0, 0, 0);
+        assert_eq!(got, 16);
+    }
+
+    #[test]
+    fn test_moves_in_y() {
+        let got = get_tile_addr(0, 0, 8, 0);
+        assert_eq!(got, 32 * 8 * 2);
+    }
+
+    #[test]
+    fn test_moves_in_tile_lines() {
+        let got = get_tile_addr(0, 0, 1, 0);
+        assert_eq!(got, 2);
+    }
+
+    #[test]
+    fn test_moves_in_tile_lines_with_scy() {
+        let got = get_tile_addr(0, 0, 0, 1);
+        assert_eq!(got, 2);
+    }
+
+    #[test]
+    fn test_moves_in_tile_lines_with_scy_intraline() {
+        let got = get_tile_addr(0, 0, 8, 1);
+        assert_eq!(got, 32 * 8 * 2 + 2);
+    }
+
+    #[test]
+    fn test_moves_scx_tile_by_tile() {
+        let got = get_tile_addr(1, 0, 8, 1);
+        assert_eq!(got, 32 * 8 * 2 + 2 + 16);
+    }
+    #[test]
+    fn test_selects_limit_right() {
+        let got = get_tile_addr(31, 0, 32 * 4, 32 * 3 + 31);
+        assert_eq!(got, 32 * 16 * 32 - 2);
+    }
+
+    #[test]
+    fn test_moves_horizontally_with_scx() {
+        let got = get_tile_addr(0, 1, 0, 0);
+        assert_eq!(got, 16);
     }
 }
