@@ -10,10 +10,8 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
-use std::time::Duration;
 mod byteop;
 use crate::byteop::*;
-use std::thread;
 use std::time;
 
 fn load_rom(filename: &str) -> Vec<u8> {
@@ -126,6 +124,7 @@ struct PPU {
 
     window_line_counter: u8,
     remaining_cycles: u8,
+    wait: u16,
 }
 
 fn get_tile_addr(x: u8, scx: u8, ly: u8, scy: u8) -> u16 {
@@ -158,6 +157,7 @@ impl PPU {
             wy: 0,
             window_line_counter: 0,
             remaining_cycles: 0,
+            wait: 0,
         }
     }
     fn get_color(&self, id: u8) -> Color {
@@ -185,10 +185,16 @@ impl PPU {
         self.obp1 = rt.get(0xFF49);
         self.wy = rt.get(0xFF4A);
         self.wx = rt.get(0xFF4B);
+        if self.wait > 0 {
+            self.wait -= 1;
+        }
     }
 
     // render background
     fn render(&mut self, rt: &mut runtime::Runtime, display: &mut Display) {
+        if self.wait > 0 {
+            return
+        }
         let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
 
         let tile_id = rt.get(self.bg_offset() + tile_addr);
@@ -220,6 +226,7 @@ impl PPU {
         self.x += 1;
         if self.x == 20 {
             self.x = 0; // hblank
+            self.wait = 456;
             self.ly += 1;
 
             let vblank = self.ly >= 144;
