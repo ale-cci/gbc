@@ -45,6 +45,10 @@ impl CpuRegisters {
         self.rc = l;
     }
 
+    fn af(&self) -> u16 {
+        return join_u8(self.ra, self.rf);
+    }
+
     fn de(&self) -> u16 {
         return join_u8(self.rd, self.re);
     }
@@ -110,12 +114,12 @@ impl Runtime<'_> {
     }
 
     pub fn tick(&mut self) -> u8 {
-        println!(
-            "{} - Opcode {}: {:?}",
-            b64(self.cpu.pc),
-            b64(self.get(self.cpu.pc)),
-            self.cpu
-        );
+        // println!(
+        //     "{} - Opcode {}: {:?}",
+        //     b64(self.cpu.pc),
+        //     b64(self.get(self.cpu.pc)),
+        //     self.cpu
+        // );
         let opcode = self.next_opcode();
 
         // https://meganesu.github.io/generate-gb-opcodes/
@@ -967,10 +971,23 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::S, 1);
                 1
             }
+            0xC0 => {
+                if self.cpu.get_flag(CFlag::Z) == 0 {
+                    self.cpu.pc = self.stack_pop_u16();
+                    5
+                } else {
+                    2
+                }
+            }
             0xC1 => {
                 // POP BC
                 self.cpu.rc = self.stack_pop();
                 self.cpu.rb = self.stack_pop();
+                3
+            }
+            0xC2 => {
+                let v = self.stack_pop_u16();
+                self.cpu.set_bc(v);
                 3
             }
             0xC3 => {
@@ -979,14 +996,56 @@ impl Runtime<'_> {
                 self.cpu.pc = join_u8(h, l);
                 4
             }
+            0xC4 => {
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+
+                if self.cpu.get_flag(CFlag::Z) == 0 {
+                    self.stack_push_u16(self.cpu.pc);
+                    self.cpu.pc = join_u8(h, l);
+                    6
+                } else {
+                    3
+                }
+            }
             0xC5 => {
                 // PUSH BC
                 self.stack_push_u16(self.cpu.bc());
                 4
             }
+            0xC6 => {
+                let imm = self.next_opcode();
+                self.cpu.ra = self.cpu.ra.wrapping_add(imm);
+                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
+                self.cpu.set_flag(CFlag::S, 0);
+                2
+            }
+            0xC7 => { // RST 0
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x00;
+                4
+            }
+            0xC8 => { // RET Z
+                if self.cpu.get_flag(CFlag::Z) == 0x1 {
+                    self.cpu.pc = self.stack_pop_u16();
+                    5
+                } else {
+                    2
+                }
+            }
             0xC9 => {
                 self.cpu.pc = self.stack_pop_u16();
                 4
+            }
+            0xCA => {
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+                if self.cpu.get_flag(CFlag::Z) == 1 {
+                    self.cpu.pc = join_u8(h, l);
+                    4
+                } else {
+                    3
+                }
             }
             0xCB => {
                 let opnext = self.next_opcode();
@@ -1001,8 +1060,56 @@ impl Runtime<'_> {
 
                 6
             }
+            0xCE => {
+                let imm = self.next_opcode();
+                self.cpu.ra = self.cpu.ra.wrapping_add(imm).wrapping_add(self.cpu.get_flag(CFlag::CY));
+                2
+            }
+            0xCF => {
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x08;
+                4
+            }
+            0xD0 => {
+                panic!("CHECK YOUR CARRY");
+                if self.cpu.get_flag(CFlag::CY) == 0 {
+                    self.cpu.pc = self.stack_pop_u16();
+                    5
+                } else {
+                    2
+                }
+            }
+            0xD1 => {
+                let de = self.stack_pop_u16();
+                self.cpu.set_de(de);
+                3
+            }
+            0xD2 => {
+                panic!("CHECK YOUR CARRY");
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+
+                if self.cpu.get_flag(CFlag::CY) == 0 {
+                    self.cpu.pc = join_u8(h, l);
+                    4
+                } else {
+                    3
+                }
+            }
+
             0xD5 => {
                 self.stack_push_u16(self.cpu.de());
+                4
+            }
+            0xD6 => {
+                self.cpu.ra =self.cpu.ra.wrapping_sub(self.cpu.ra);
+                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
+                self.cpu.set_flag(CFlag::S, 1);
+                2
+            }
+            0xD7 => {
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x10;
                 4
             }
             0xE0 => {
@@ -1041,7 +1148,6 @@ impl Runtime<'_> {
                 let l = self.next_opcode();
                 let h = self.next_opcode();
                 let addr = join_u8(h, l);
-                println!("{} {}", h, l);
                 self.set(addr, self.cpu.ra);
                 4
             }
@@ -1055,6 +1161,11 @@ impl Runtime<'_> {
                 self.cpu.ra = self.get(addr);
                 3
             }
+            0xF1 => {
+                let imm = self.next_opcode();
+                self.cpu.ra = self.get(0xFF00 + imm as u16);
+                3
+            }
             0xF2 => {
                 let addr = 0xFF0 + self.cpu.rc as u16;
                 self.cpu.ra = self.get(addr);
@@ -1065,6 +1176,41 @@ impl Runtime<'_> {
                 self.cpu.ime = false;
                 1
             }
+            0xF5 => {
+                let af = self.cpu.af();
+                self.stack_push_u16(af);
+                4
+            }
+            0xF6 => {
+                self.cpu.ra |= self.next_opcode();
+                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
+                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::H, 0);
+                self.cpu.set_flag(CFlag::CY, 0);
+                2
+            }
+            0xF7 => {
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x30;
+                4
+            }
+            0xF8 => {
+                let val = self.next_opcode();
+                self.cpu.set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
+                self.cpu.set_flag(CFlag::Z, 0);
+                self.cpu.set_flag(CFlag::S, 0);
+                3
+            }
+            0xF9 => {
+                self.cpu.set_hl(self.cpu.sp);
+                2
+            }
+            0xFA => {
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+                self.cpu.ra = self.get(join_u8(h, l));
+                4
+            }
             0xFB => { // EI
                 self.cpu.ime = true;
                 1
@@ -1074,6 +1220,11 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == imm) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
                 2
+            }
+            0xFF => {
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x38;
+                4
             }
             _ => {
                 panic!("ERROR: Opcode 0x{} not implemented!", b64(opcode));
@@ -1164,6 +1315,120 @@ impl Runtime<'_> {
                 2
             }
 
+            0x80 => res(&mut self.cpu.rb, 0),
+            0x81 => res(&mut self.cpu.rc, 0),
+            0x82 => res(&mut self.cpu.rd, 0),
+            0x83 => res(&mut self.cpu.re, 0),
+            0x84 => res(&mut self.cpu.rh, 0),
+            0x85 => res(&mut self.cpu.rl, 0),
+            0x86 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 0, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0x87 => res(&mut self.cpu.ra, 0),
+
+            0x88 => res(&mut self.cpu.rb, 1),
+            0x89 => res(&mut self.cpu.rc, 1),
+            0x8A => res(&mut self.cpu.rd, 1),
+            0x8B => res(&mut self.cpu.re, 1),
+            0x8C => res(&mut self.cpu.rh, 1),
+            0x8D => res(&mut self.cpu.rl, 1),
+            0x8E => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 1, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0x8F => res(&mut self.cpu.ra, 1),
+
+            0x90 => res(&mut self.cpu.rb, 2),
+            0x91 => res(&mut self.cpu.rc, 2),
+            0x92 => res(&mut self.cpu.rd, 2),
+            0x93 => res(&mut self.cpu.re, 2),
+            0x94 => res(&mut self.cpu.rh, 2),
+            0x95 => res(&mut self.cpu.rl, 2),
+            0x96 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 2, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0x97 => res(&mut self.cpu.ra, 2),
+
+            0x98 => res(&mut self.cpu.rb, 3),
+            0x99 => res(&mut self.cpu.rc, 3),
+            0x9A => res(&mut self.cpu.rd, 3),
+            0x9B => res(&mut self.cpu.re, 3),
+            0x9C => res(&mut self.cpu.rh, 3),
+            0x9D => res(&mut self.cpu.rl, 3),
+            0x9E => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 3, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0x9F => res(&mut self.cpu.ra, 3),
+
+
+            0xA0 => res(&mut self.cpu.rb, 4),
+            0xA1 => res(&mut self.cpu.rc, 4),
+            0xA2 => res(&mut self.cpu.rd, 2),
+            0xA3 => res(&mut self.cpu.re, 4),
+            0xA4 => res(&mut self.cpu.rh, 4),
+            0xA5 => res(&mut self.cpu.rl, 4),
+            0xA6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 4, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xA7 => res(&mut self.cpu.ra, 4),
+
+            0xA8 => res(&mut self.cpu.rb, 5),
+            0xA9 => res(&mut self.cpu.rc, 5),
+            0xAA => res(&mut self.cpu.rd, 5),
+            0xAB => res(&mut self.cpu.re, 5),
+            0xAC => res(&mut self.cpu.rh, 5),
+            0xAD => res(&mut self.cpu.rl, 5),
+            0xAE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 5, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xAF => res(&mut self.cpu.ra, 5),
+
+            0xB0 => res(&mut self.cpu.rb, 6),
+            0xB1 => res(&mut self.cpu.rc, 6),
+            0xB2 => res(&mut self.cpu.rd, 6),
+            0xB3 => res(&mut self.cpu.re, 6),
+            0xB4 => res(&mut self.cpu.rh, 6),
+            0xB5 => res(&mut self.cpu.rl, 6),
+            0xB6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 6, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xB7 => res(&mut self.cpu.ra, 6),
+
+            0xB8 => res(&mut self.cpu.rb, 7),
+            0xB9 => res(&mut self.cpu.rc, 7),
+            0xBA => res(&mut self.cpu.rd, 7),
+            0xBB => res(&mut self.cpu.re, 7),
+            0xBC => res(&mut self.cpu.rh, 7),
+            0xBD => res(&mut self.cpu.rl, 7),
+            0xBE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 7, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xBF => res(&mut self.cpu.ra, 7),
+
+
             _ => {
                 panic!("ERROR: Opcode CB{} not implemented", b64(opcode));
             }
@@ -1202,10 +1467,9 @@ impl Runtime<'_> {
                 println!("Write on RO memory ({}): {}", b64(addr), b64(val));
             }
             0x7FFF => {
-                panic!("DANGER!");
+                // panic!("DANGER!");
             }
             0x8000..=0x9FFF => {
-                println!("Setting memory region {}", b64(addr));
                 self.vram[(addr - 0x8000) as usize] = val
             }
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
@@ -1236,6 +1500,11 @@ impl Runtime<'_> {
         let h = self.stack_pop();
         return join_u8(h, l);
     }
+}
+
+fn res(reg: &mut u8, pos: u8) -> u8 {
+    *reg = set_bit(*reg, pos, false);
+    2
 }
 
 #[cfg(test)]

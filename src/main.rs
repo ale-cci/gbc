@@ -5,6 +5,7 @@ extern crate sdl2;
 use std::fs;
 use std::io::Read;
 mod runtime;
+use runtime::Runtime;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
@@ -174,7 +175,7 @@ impl PPU {
         return colors[id as usize];
     }
 
-    fn update(&mut self, rt: &runtime::Runtime) {
+    fn update(&mut self, rt: &runtime::Runtime, cc: u8) -> bool {
         self.r_control = rt.get(0xFF40);
         self.r_status = rt.get(0xFF41);
         self.scy = rt.get(0xFF42);
@@ -185,42 +186,35 @@ impl PPU {
         self.obp1 = rt.get(0xFF49);
         self.wy = rt.get(0xFF4A);
         self.wx = rt.get(0xFF4B);
-        if self.wait > 0 {
-            self.wait -= 1;
+
+        let cc = cc as u16 * 4;
+        if self.wait <= cc {
+            self.wait = 0;
+        } else if self.wait > 0 {
+            self.wait -= cc;
         }
+        return self.wait == 0;
     }
 
     // render background
     fn render(&mut self, rt: &mut runtime::Runtime, display: &mut Display) {
-        if self.wait > 0 {
-            return
-        }
         let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
+        let bg_tilemap = get_bit(self.r_control, 3);
 
-        let tile_id = rt.get(self.bg_offset() + tile_addr);
+        let tile_id = rt.get(self.tile_offset(bg_tilemap) + tile_addr);
+        let ttr = self.get_tile(tile_id, self.ly + self.scy);
+        self.render_tile(display, &rt, ttr, self.x, self.ly);
 
-        let ttr = if get_bit(self.r_control, 4) == 0 {
-            0x8800
-        } else {
-            let intratile = (self.ly as u16 + self.scy as u16) & 0b111;
-            0x8000 + (tile_id as u16 * 16) + intratile * 2
-        };
-        // mode 0x8000 - 0x8800
-        let fst = rt.get(ttr + 1);
-        let snd = rt.get(ttr + 0);
+        let window_enable = get_bit(self.r_control, 5) == 1;
+        let window_visible = (0..=166).contains(&self.wx) && (0..=143).contains(&self.wy);
+        let window_tilemap = get_bit(self.r_control, 6);
 
-        // let fst = rt.get(self.bg_offset() + tile_addr);
-        // let snd = rt.get(self.bg_offset() + tile_addr + 1);
+        if window_enable && window_visible && self.ly == self.wy {
+            let tile_addr = self.x as u16 + self.ly as u16 * 32;
+            let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
-        for i in 0..8 {
-            let l = get_bit(fst, i);
-            let h = get_bit(snd, i);
-            let color = (h << 1) + l;
-
-            let x = self.x * 8 + (7 - i);
-            let y = self.ly;
-
-            display.set_pixel(x, y, self.get_color(color));
+            let ttr = self.get_tile(tile_id, self.ly);
+            self.render_tile(display, &rt, ttr, self.wx + self.x, self.wy);
         }
 
         self.x += 1;
@@ -239,6 +233,7 @@ impl PPU {
         }
 
         let mut r_status = self.r_status;
+
         if self.ly == self.lyc {
             if get_bit(self.r_status, 6) == 1 {
                 // LYC int select Trigger interrupt if
@@ -253,12 +248,37 @@ impl PPU {
         rt.set(0xFF44, self.ly);
     }
 
-    fn bg_offset(&self) -> u16 {
-        return if get_bit(self.r_control, 3) == 0 {
-            0x9800
+    fn tile_offset(&self, id: u8) -> u16 {
+        return if id == 0 { 0x9800 } else { 0x9C00 };
+    }
+
+    fn get_tile(&self, tile: u8, y: u8) -> u16 {
+        let intratile = (y & 0b111) as u16;
+
+        if get_bit(self.r_control, 4) == 0 {
+            0x8800u16.wrapping_add((tile as i8) as u16) + intratile * 2
         } else {
-            0x9C00
-        };
+            0x8000 + (tile as u16 * 16) + intratile * 2
+        }
+    }
+
+    fn render_tile(&self, display: &mut Display, rt: &Runtime, ttr: u16, x: u8, y: u8) {
+        let fst = rt.get(ttr + 1);
+        let snd = rt.get(ttr + 0);
+
+        // let fst = rt.get(self.bg_offset() + tile_addr);
+        // let snd = rt.get(self.bg_offset() + tile_addr + 1);
+
+        for i in 0..8 {
+            let l = get_bit(fst, i);
+            let h = get_bit(snd, i);
+            let color = (h << 1) + l;
+
+            let x = x * 8 + (7 - i);
+            let y = y;
+
+            display.set_pixel(x, y, self.get_color(color));
+        }
     }
 }
 
@@ -288,7 +308,10 @@ fn main() {
     let mut ppu = PPU::new();
 
     let refresh_target = time::Duration::from_micros(10000000 / 60);
+    let clock_target = time::Duration::from_nanos(1_000_000_000 / 4194304);
+
     let mut ft = time::Instant::now();
+    let mut tick = time::Instant::now();
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -302,14 +325,18 @@ fn main() {
             }
         }
 
-        let cc = rt.tick();
-        for _ in 0..cc {
-            ppu.update(&rt);
-            ppu.render(&mut rt, &mut display);
+        if tick.elapsed() > clock_target {
+            let cc = rt.tick();
+            if ppu.update(&rt, cc) {
+                ppu.render(&mut rt, &mut display);
+            }
         }
+        tick = time::Instant::now();
+
 
         // Refresh 60fps
         if ft.elapsed() > refresh_target {
+            // println!("Tick: {:?} ~0.25µs ({:?})", tick.elapsed(), clock_target);
             canvas.clear();
             ft = time::Instant::now();
             display.render(&mut canvas);
