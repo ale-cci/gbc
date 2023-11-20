@@ -8,8 +8,10 @@ pub fn split_u16(hl: u16) -> (u8, u8) {
     return (h, l);
 }
 
-pub fn get_bit(reg: u8, pos: u8) -> u8 {
-    return (reg & (1 << pos)) >> pos;
+pub fn get_bit<T: Into<u16>>(reg: T, pos: u8) -> u8 {
+    let reg = reg.into();
+    let bit = (reg & (1 << pos as u16)) >> pos as u16;
+    return bit as u8;
 }
 
 pub fn set_bit<T: Into<bool>>(reg: u8, pos: u8, val: T) -> u8 {
@@ -67,8 +69,3 @@ pub fn rl(cy: u8, reg: u8) -> (u8, u8) {
     )
 }
 
-pub fn swap(reg: u8) -> u8 {
-    let lower = reg & 0b1111;
-    let upper = reg >> 4;
-    return (lower << 4) + upper;
-}

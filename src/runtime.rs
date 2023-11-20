@@ -1,6 +1,5 @@
 use crate::byteop::*;
 
-
 #[derive(Debug)]
 struct CpuRegisters {
     ra: u8,
@@ -23,9 +22,24 @@ enum CFlag {
     CY = 4, // carry
 }
 
-const PAGE_ZERO : u16 = 0xFF80;
+const PAGE_ZERO: u16 = 0xFF80;
 
 impl CpuRegisters {
+    fn new() -> CpuRegisters {
+        CpuRegisters {
+            ra: 0,
+            rf: 0,
+            rb: 0,
+            rc: 0,
+            rd: 0,
+            re: 0,
+            rh: 0,
+            rl: 0,
+            pc: 0,
+            sp: 0,
+            ime: false,
+        }
+    }
     fn set_flag(&mut self, flag: CFlag, val: u8) {
         self.rf = set_bit(self.rf, flag as u8, val == 1);
     }
@@ -49,6 +63,12 @@ impl CpuRegisters {
         return join_u8(self.ra, self.rf);
     }
 
+    fn set_af(&mut self, val: u16) {
+        let (h, l) = split_u16(val);
+        self.ra = h;
+        self.rf = l;
+    }
+
     fn de(&self) -> u16 {
         return join_u8(self.rd, self.re);
     }
@@ -67,13 +87,103 @@ impl CpuRegisters {
         self.rl = l;
     }
 
-    fn add_ra(&mut self, val: u8) {
+    fn dec(&mut self, val: u8) -> u8 {
+        let val = val.wrapping_sub(1);
+        self.set_flag(CFlag::Z, (val == 0) as u8);
+        self.set_flag(CFlag::S, 1);
+        self.set_flag(CFlag::H, (val & 0b11111 == 0b10000) as u8);
+        return val;
+    }
+
+    // cpu arithmetic instructions
+    fn add_ra(&mut self, val: u8) -> u8 {
+        // https://gist.github.com/meganesu/9e228b6b587decc783aa9be34ae27841
+        let half_carry = (((self.ra & 0xF) + (val & 0xF)) & 0x10) == 0x10;
+
         let res = self.ra as u16 + val as u16;
+
         self.ra = (res & 0b11111111) as u8;
-        self.set_flag(CFlag::Z, (res == 0) as u8);
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
         self.set_flag(CFlag::S, 0);
-        self.set_flag(CFlag::CY, ((res & (1 << 9)) >> 9) as u8);
-        // self.set_flag(CFlag::H, 0);
+        self.set_flag(CFlag::CY, get_bit(res, 8));
+        self.set_flag(CFlag::H, half_carry as u8);
+        return 1;
+    }
+
+    // cpu arithmetic instructions
+    fn adc_ra(&mut self, val: u8) -> u8 {
+        // let half_carry = (((self.ra & 0xF) + (val & 0xF)) & 0x10) == 0x10;
+
+        let res = self.ra as u16 + val as u16 + self.get_flag(CFlag::CY) as u16;
+
+        self.ra = (res & 0b11111111) as u8;
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::CY, get_bit(res, 8));
+        // self.set_flag(CFlag::H, half_carry as u8);
+        return 1;
+    }
+
+    fn or_ra(&mut self, val: u8) -> u8 {
+        self.ra |= val;
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, 0);
+        self.set_flag(CFlag::CY, 0);
+        return 1;
+    }
+
+    fn cp_ra(&mut self, val: u8) -> u8 {
+        self.set_flag(CFlag::Z, (self.ra == val) as u8);
+        self.set_flag(CFlag::S, 1);
+        self.set_flag(CFlag::CY, (self.ra < val) as u8);
+        1
+    }
+
+    fn xor_ra(&mut self, val: u8) -> u8 {
+        self.ra ^= val;
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, 0);
+        self.set_flag(CFlag::CY, 0);
+        1
+    }
+
+    fn and_ra(&mut self, val: u8) -> u8 {
+        self.ra &= val;
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, 1);
+        self.set_flag(CFlag::CY, 0);
+        1
+    }
+
+    fn ld_ra(&mut self, val: u8) -> u8 {
+        self.ra = val;
+        1
+    }
+
+    fn swap(&mut self, val: u8) -> u8 {
+        let lower = val & 0b1111;
+        let upper = val >> 4;
+        let val = (lower << 4) + upper;
+        self.set_flag(CFlag::Z, (val == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, 0);
+        self.set_flag(CFlag::CY, 0);
+        return val;
+    }
+
+    fn jr(&mut self, raddr: i8) {
+        self.pc = self.pc.wrapping_add(raddr as u16);
+    }
+
+    fn inc(&mut self, val: u8) -> u8 {
+        let val = val.wrapping_add(1);
+        self.set_flag(CFlag::Z, (val == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, ((val & 0b1111) == 0b1111) as u8);
+        return val;
     }
 }
 
@@ -85,35 +195,28 @@ pub struct Runtime<'a> {
     wram: Vec<u8>,
 
     hwcfg: u8,
+    _timeout: Option<u16>,
 }
 
 impl Runtime<'_> {
     pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a Vec<u8>) -> Runtime<'a> {
         let mut rt = Runtime {
-            cpu: CpuRegisters {
-                ra: 0,
-                rf: 0,
-                rb: 0,
-                rc: 0,
-                rd: 0,
-                re: 0,
-                rh: 0,
-                rl: 0,
-                pc: 0,
-                sp: 0,
-                ime: false,
-            },
+            cpu: CpuRegisters::new(),
             rom,
             bootstrap,
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
 
             hwcfg: 0x0,
+            _timeout: None,
         };
 
         // https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
         rt.hwcfg = rt.get(0x0147);
         return rt;
+    }
+    fn countdown(&mut self, cd: u16) {
+        self._timeout = Some(cd);
     }
 
     fn next_opcode(&mut self) -> u8 {
@@ -123,6 +226,16 @@ impl Runtime<'_> {
     }
 
     pub fn tick(&mut self) -> u8 {
+        self._timeout = match self._timeout {
+            Some(value) => {
+                if value == 0 {
+                    panic!("Countdown reached zero");
+                }
+                Some(value - 1)
+            }
+            None => None,
+        };
+
         // println!(
         //     "{} - Opcode {}: {:?}",
         //     b64(self.cpu.pc),
@@ -148,7 +261,7 @@ impl Runtime<'_> {
                 2
             }
             0x03 => {
-                self.cpu.set_bc(self.cpu.bc() + 1);
+                self.cpu.set_bc(self.cpu.bc().wrapping_add(1));
                 2
             }
             0x04 => {
@@ -159,9 +272,7 @@ impl Runtime<'_> {
             }
             0x05 => {
                 // DEC B
-                self.cpu.rb = self.cpu.rb.wrapping_sub(1);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rb == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
+                self.cpu.rb = self.cpu.dec(self.cpu.rb);
                 1
             }
             0x06 => {
@@ -189,12 +300,13 @@ impl Runtime<'_> {
                 5
             }
             0x09 => {
-                let res = self.cpu.hl().wrapping_add(self.cpu.bc());
+                let (cy, res) = add_u16(self.cpu.hl(), self.cpu.bc());
+
                 self.cpu.set_hl(res);
 
-                self.cpu.set_flag(CFlag::Z, (res == 0) as u8);
+                // self.cpu.set_flag(CFlag::Z, (res == 0) as u8);
                 self.cpu.set_flag(CFlag::S, 0);
-                // TODO: self.cpu.set_flag(CFlag::CY
+                self.cpu.set_flag(CFlag::CY, cy as u8);
                 2
             }
             0x0A => {
@@ -206,20 +318,14 @@ impl Runtime<'_> {
                 2
             }
             0x0C => {
-                // INC CY
-                self.cpu.rc += 1;
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rc == 0) as u8);
+                self.cpu.rc = self.cpu.inc(self.cpu.rc);
                 1
             }
             0x0D => {
-                self.cpu.rc -= 1;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rc == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
+                self.cpu.rc = self.cpu.dec(self.cpu.rc);
                 1
             }
             0x0E => {
-                // LD CY, u8
                 self.cpu.rc = self.next_opcode();
                 2
             }
@@ -238,9 +344,9 @@ impl Runtime<'_> {
                 panic!("STOP!");
             }
             0x11 => {
-                // LD DE, u16
-                self.cpu.re = self.next_opcode();
-                self.cpu.rd = self.next_opcode();
+                let l = self.next_opcode();
+                let h = self.next_opcode();
+                self.cpu.set_de(join_u8(h, l));
                 3
             }
             0x12 => {
@@ -253,13 +359,11 @@ impl Runtime<'_> {
                 2
             }
             0x14 => {
-                self.cpu.rd += 1;
+                self.cpu.rd = self.cpu.inc(self.cpu.rd);
                 1
             }
             0x15 => {
-                self.cpu.rd -= 1;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rd == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
+                self.cpu.rd = self.cpu.dec(self.cpu.rd);
                 1
             }
             0x16 => {
@@ -268,10 +372,7 @@ impl Runtime<'_> {
             }
             0x17 => {
                 // RLA
-                let (cy, ra) = rl(
-                    self.cpu.get_flag(CFlag::CY),
-                    self.cpu.ra,
-                );
+                let (cy, ra) = rl(self.cpu.get_flag(CFlag::CY), self.cpu.ra);
                 self.cpu.ra = ra;
                 self.cpu.set_flag(CFlag::CY, cy);
                 self.cpu.set_flag(CFlag::S, 0);
@@ -281,12 +382,15 @@ impl Runtime<'_> {
             }
             0x18 => {
                 let raddr = self.next_opcode() as i8;
-                self.cpu.pc = self.cpu.pc.wrapping_add(raddr as u16);
+                self.cpu.jr(raddr);
                 3
             }
             0x19 => {
-                self.cpu.set_hl(self.cpu.hl().wrapping_add(self.cpu.de()));
+                let (cy, res) = add_u16(self.cpu.hl(), self.cpu.de());
+
+                self.cpu.set_hl(res);
                 self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::CY, cy as u8);
                 2
             }
             0x1A => {
@@ -298,15 +402,11 @@ impl Runtime<'_> {
                 2
             }
             0x1C => {
-                self.cpu.re = self.cpu.re.wrapping_add(1);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.re == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.re = self.cpu.inc(self.cpu.re);
                 1
             }
             0x1D => {
-                self.cpu.re -= 1;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.re == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
+                self.cpu.re = self.cpu.dec(self.cpu.re);
                 1
             }
             0x1E => {
@@ -316,7 +416,7 @@ impl Runtime<'_> {
             0x20 => {
                 let addr = self.next_opcode() as i8;
                 if self.cpu.get_flag(CFlag::Z) == 0 {
-                    self.cpu.pc = self.cpu.pc.wrapping_add(addr as u16);
+                    self.cpu.jr(addr);
                     3
                 } else {
                     2
@@ -339,15 +439,11 @@ impl Runtime<'_> {
                 2
             }
             0x24 => {
-                self.cpu.rh = self.cpu.rh.wrapping_add(1);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rh == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.rh = self.cpu.inc(self.cpu.rh);
                 1
             }
             0x25 => {
-                self.cpu.rh = self.cpu.rh.wrapping_sub(1);
-                self.cpu.set_flag(CFlag::S, 1);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rh == 0) as u8);
+                self.cpu.rh = self.cpu.dec(self.cpu.rh);
                 1
             }
             0x26 => {
@@ -357,7 +453,7 @@ impl Runtime<'_> {
             0x28 => {
                 let raddr = self.next_opcode() as i8;
                 if self.cpu.get_flag(CFlag::Z) == 1 {
-                    self.cpu.pc = self.cpu.pc.wrapping_add(raddr as u16);
+                    self.cpu.jr(raddr);
                     3
                 } else {
                     2
@@ -367,6 +463,14 @@ impl Runtime<'_> {
                 self.cpu.ra = self.get(self.cpu.hl());
                 self.cpu.set_hl(self.cpu.hl() + 1);
                 2
+            }
+            0x2C => {
+                self.cpu.rl = self.cpu.inc(self.cpu.rl);
+                1
+            }
+            0x2D => {
+                self.cpu.rl = self.cpu.dec(self.cpu.rl);
+                1
             }
             0x2E => {
                 self.cpu.rl = self.next_opcode();
@@ -635,90 +739,33 @@ impl Runtime<'_> {
                 self.set(self.cpu.hl(), self.cpu.ra);
                 2
             }
-            0x78 => {
-                self.cpu.ra = self.cpu.rb;
-                1
-            }
-            0x79 => {
-                self.cpu.ra = self.cpu.rc;
-                1
-            }
-            0x7A => {
-                self.cpu.ra = self.cpu.rd;
-                1
-            }
-            0x7B => {
-                // LD A, E
-                self.cpu.ra = self.cpu.re;
-                1
-            }
-            0x7C => {
-                self.cpu.ra = self.cpu.rh;
-                1
-            }
-            0x7D => {
-                self.cpu.ra = self.cpu.rl;
-                1
-            }
-            0x7E => {
-                self.cpu.ra = self.get(self.cpu.hl());
-                2
-            }
-            0x7F => {
-                self.cpu.ra = self.cpu.ra;
-                1
-            }
-            0x80 => {
-                self.cpu.add_ra(self.cpu.rb);
-                1
-            }
-            0x81 => {
-                self.cpu.add_ra(self.cpu.rc);
-                1
-            }
-            0x82 => {
-                self.cpu.add_ra(self.cpu.rd);
-                1
-            }
-            0x83 => {
-                self.cpu.add_ra(self.cpu.re);
-                1
-            }
-            0x84 => {
-                self.cpu.add_ra(self.cpu.rh);
-                1
-            }
-            0x85 => {
-                self.cpu.add_ra(self.cpu.rl);
-                1
-            }
-            0x86 => {
-                self.cpu.add_ra(self.get(self.cpu.hl()));
-                2
-            }
-            0x87 => {
-                self.cpu.add_ra(self.cpu.ra);
-                1
-            }
 
-            0x88 => {
-                self.cpu.ra += self.cpu.rb + self.cpu.get_flag(CFlag::CY);
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                1
-            }
-            0x89 => {
-                self.cpu.ra += self.cpu.rc.wrapping_add(self.cpu.get_flag(CFlag::CY));
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                1
-            }
-            0x8A => {
-                self.cpu.ra += self.cpu.rd.wrapping_add(self.cpu.get_flag(CFlag::CY));
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                1
-            }
+            0x78 => self.cpu.ld_ra(self.cpu.rb),
+            0x79 => self.cpu.ld_ra(self.cpu.rc),
+            0x7A => self.cpu.ld_ra(self.cpu.rd),
+            0x7B => self.cpu.ld_ra(self.cpu.re),
+            0x7C => self.cpu.ld_ra(self.cpu.rh),
+            0x7D => self.cpu.ld_ra(self.cpu.rl),
+            0x7E => self.cpu.ld_ra(self.get(self.cpu.hl())) * 2,
+            0x7F => self.cpu.ld_ra(self.cpu.ra),
+
+            0x80 => self.cpu.add_ra(self.cpu.rb),
+            0x81 => self.cpu.add_ra(self.cpu.rc),
+            0x82 => self.cpu.add_ra(self.cpu.rd),
+            0x83 => self.cpu.add_ra(self.cpu.re),
+            0x84 => self.cpu.add_ra(self.cpu.rh),
+            0x85 => self.cpu.add_ra(self.cpu.rl),
+            0x86 => self.cpu.add_ra(self.get(self.cpu.hl())) * 2,
+            0x87 => self.cpu.add_ra(self.cpu.ra),
+
+            0x88 => self.cpu.adc_ra(self.cpu.rb),
+            0x89 => self.cpu.adc_ra(self.cpu.rc),
+            0x8A => self.cpu.adc_ra(self.cpu.rd),
+            0x8B => self.cpu.adc_ra(self.cpu.re),
+            0x8C => self.cpu.adc_ra(self.cpu.rh),
+            0x8D => self.cpu.adc_ra(self.cpu.rl),
+            0x8E => self.cpu.adc_ra(self.get(self.cpu.hl())) * 2,
+            0x8F => self.cpu.adc_ra(self.cpu.ra),
 
             0x90 => {
                 let cy = self.cpu.ra < self.cpu.rb;
@@ -728,239 +775,43 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::CY, cy as u8);
                 1
             }
-            0xA0 => {
-                self.cpu.ra &= self.cpu.rb;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.set_flag(CFlag::CY, 0);
-                1
-            }
-            0xA1 => {
-                self.cpu.ra &= self.cpu.rc;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA2 => {
-                self.cpu.ra &= self.cpu.rd;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA3 => {
-                self.cpu.ra &= self.cpu.re;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA4 => {
-                self.cpu.ra &= self.cpu.rh;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA5 => {
-                self.cpu.ra &= self.cpu.rl;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA6 => {
-                self.cpu.ra &= self.get(self.cpu.hl());
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                2
-            }
-            0xA7 => {
-                self.cpu.ra &= self.cpu.ra;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA8 => {
-                self.cpu.ra ^= self.cpu.rb;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xA9 => {
-                self.cpu.ra ^= self.cpu.rc;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xAA => {
-                self.cpu.ra ^= self.cpu.rd;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xAB => {
-                self.cpu.ra ^= self.cpu.re;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xAC => {
-                self.cpu.ra ^= self.cpu.rh;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xAD => {
-                self.cpu.ra ^= self.cpu.rl;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xAE => {
-                self.cpu.ra ^= self.get(self.cpu.hl());
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                2
-            }
-            0xAF => {
-                self.cpu.ra ^= self.cpu.ra;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                1
-            }
-            0xB0 => {
-                self.cpu.ra |= self.cpu.rb;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB1 => {
-                self.cpu.ra |= self.cpu.rc;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB2 => {
-                self.cpu.ra |= self.cpu.rd;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB3 => {
-                self.cpu.ra |= self.cpu.re;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB4 => {
-                self.cpu.ra |= self.cpu.rh;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB5 => {
-                self.cpu.ra |= self.cpu.rl;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB6 => {
-                self.cpu.ra |= self.get(self.cpu.hl());
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                2
-            }
-            0xB7 => {
-                self.cpu.ra |= self.cpu.ra;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
-                self.cpu.clear_flag(CFlag::S);
-                1
-            }
-            0xB8 => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.rb) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xB9 => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.rc) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xBA => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.rd) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xBB => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.re) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xBC => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.rh) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xBD => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.rl) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
-            0xBE => {
-                let val = self.get(self.cpu.hl());
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == val) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                2
-            }
-            0xBF => {
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == self.cpu.ra) as u8);
-                self.cpu.set_flag(CFlag::S, 1);
-                1
-            }
+
+            0xA0 => self.cpu.and_ra(self.cpu.rb),
+            0xA1 => self.cpu.and_ra(self.cpu.rc),
+            0xA2 => self.cpu.and_ra(self.cpu.rd),
+            0xA3 => self.cpu.and_ra(self.cpu.re),
+            0xA4 => self.cpu.and_ra(self.cpu.rh),
+            0xA5 => self.cpu.and_ra(self.cpu.rl),
+            0xA6 => self.cpu.and_ra(self.get(self.cpu.hl())) * 2,
+            0xA7 => self.cpu.and_ra(self.cpu.ra),
+
+            0xA8 => self.cpu.xor_ra(self.cpu.rb),
+            0xA9 => self.cpu.xor_ra(self.cpu.rc),
+            0xAA => self.cpu.xor_ra(self.cpu.rd),
+            0xAB => self.cpu.xor_ra(self.cpu.re),
+            0xAC => self.cpu.xor_ra(self.cpu.rh),
+            0xAD => self.cpu.xor_ra(self.cpu.rl),
+            0xAE => self.cpu.xor_ra(self.get(self.cpu.hl())) * 2,
+            0xAF => self.cpu.xor_ra(self.cpu.ra),
+
+            0xB0 => self.cpu.or_ra(self.cpu.rb),
+            0xB1 => self.cpu.or_ra(self.cpu.rc),
+            0xB2 => self.cpu.or_ra(self.cpu.rd),
+            0xB3 => self.cpu.or_ra(self.cpu.re),
+            0xB4 => self.cpu.or_ra(self.cpu.rh),
+            0xB5 => self.cpu.or_ra(self.cpu.rl),
+            0xB6 => self.cpu.or_ra(self.get(self.cpu.hl())) * 2,
+            0xB7 => self.cpu.or_ra(self.cpu.ra),
+
+            0xB8 => self.cpu.cp_ra(self.cpu.rb),
+            0xB9 => self.cpu.cp_ra(self.cpu.rc),
+            0xBA => self.cpu.cp_ra(self.cpu.rd),
+            0xBB => self.cpu.cp_ra(self.cpu.re),
+            0xBC => self.cpu.cp_ra(self.cpu.rh),
+            0xBD => self.cpu.cp_ra(self.cpu.rl),
+            0xBE => self.cpu.cp_ra(self.get(self.cpu.hl())) * 2,
+            0xBF => self.cpu.cp_ra(self.cpu.ra),
+
             0xC0 => {
                 if self.cpu.get_flag(CFlag::Z) == 0 {
                     self.cpu.pc = self.stack_pop_u16();
@@ -970,9 +821,8 @@ impl Runtime<'_> {
                 }
             }
             0xC1 => {
-                // POP BC
-                self.cpu.rc = self.stack_pop();
-                self.cpu.rb = self.stack_pop();
+                let val = self.stack_pop_u16();
+                self.cpu.set_bc(val);
                 3
             }
             0xC2 => {
@@ -1010,13 +860,14 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::S, 0);
                 2
             }
-            0xC7 => { // RST 0
+            0xC7 => {
+                // RST 0
                 self.stack_push_u16(self.cpu.pc);
                 self.cpu.pc = 0x00;
                 4
             }
-            0xC8 => { // RET Z
-                if self.cpu.get_flag(CFlag::Z) == 0x1 {
+            0xC8 => {
+                if self.cpu.get_flag(CFlag::Z) == 1 {
                     self.cpu.pc = self.stack_pop_u16();
                     5
                 } else {
@@ -1047,12 +898,15 @@ impl Runtime<'_> {
                 let h = self.next_opcode();
                 self.stack_push_u16(self.cpu.pc); // save PC to the stack
                 self.cpu.pc = join_u8(h, l);
-
                 6
             }
             0xCE => {
                 let imm = self.next_opcode();
-                self.cpu.ra = self.cpu.ra.wrapping_add(imm).wrapping_add(self.cpu.get_flag(CFlag::CY));
+                self.cpu.ra = self
+                    .cpu
+                    .ra
+                    .wrapping_add(imm)
+                    .wrapping_add(self.cpu.get_flag(CFlag::CY));
                 2
             }
             0xCF => {
@@ -1092,7 +946,7 @@ impl Runtime<'_> {
                 4
             }
             0xD6 => {
-                self.cpu.ra =self.cpu.ra.wrapping_sub(self.cpu.ra);
+                self.cpu.ra = self.cpu.ra.wrapping_sub(self.cpu.ra);
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
                 2
@@ -1121,15 +975,13 @@ impl Runtime<'_> {
                 self.stack_push_u16(self.cpu.hl());
                 4
             }
+
             0xE6 => {
                 let op = self.next_opcode();
-                self.cpu.ra &= op;
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.and_ra(op);
                 2
             }
+
             0xE9 => {
                 self.cpu.pc = self.cpu.hl();
                 1
@@ -1152,8 +1004,10 @@ impl Runtime<'_> {
                 3
             }
             0xF1 => {
-                let imm = self.next_opcode();
-                self.cpu.ra = self.get(0xFF00 + imm as u16);
+                let val = self.stack_pop_u16();
+                self.cpu.set_af(val);
+
+                //2self.countdown(2400);
                 3
             }
             0xF2 => {
@@ -1186,7 +1040,8 @@ impl Runtime<'_> {
             }
             0xF8 => {
                 let val = self.next_opcode();
-                self.cpu.set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
+                self.cpu
+                    .set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
                 self.cpu.set_flag(CFlag::Z, 0);
                 self.cpu.set_flag(CFlag::S, 0);
                 3
@@ -1201,7 +1056,8 @@ impl Runtime<'_> {
                 self.cpu.ra = self.get(join_u8(h, l));
                 4
             }
-            0xFB => { // EI
+            0xFB => {
+                // EI
                 self.cpu.ime = true;
                 1
             }
@@ -1209,9 +1065,11 @@ impl Runtime<'_> {
                 let imm = self.next_opcode();
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == imm) as u8);
                 self.cpu.set_flag(CFlag::S, 1);
+                self.cpu.set_flag(CFlag::CY, (self.cpu.ra < imm) as u8);
                 2
             }
             0xFF => {
+                panic!("NI");
                 self.stack_push_u16(self.cpu.pc);
                 self.cpu.pc = 0x38;
                 4
@@ -1233,68 +1091,36 @@ impl Runtime<'_> {
                 2
             }
             0x30 => {
-                self.cpu.rb = swap(self.cpu.rb);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rb == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.rb = self.cpu.swap(self.cpu.rb);
                 2
             }
             0x31 => {
-                self.cpu.rc = swap(self.cpu.rc);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rc == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.rc = self.cpu.swap(self.cpu.rc);
                 2
             }
             0x32 => {
-                self.cpu.rd = swap(self.cpu.rd);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rd == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.rd = self.cpu.swap(self.cpu.rd);
                 2
             }
             0x33 => {
-                self.cpu.re = swap(self.cpu.re);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.re == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.re = self.cpu.swap(self.cpu.re);
                 2
             }
             0x34 => {
-                self.cpu.rh = swap(self.cpu.rh);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rh == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.rh = self.cpu.swap(self.cpu.rh);
                 2
             }
             0x35 => {
-                self.cpu.rl = swap(self.cpu.rl);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rl == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.rl = self.cpu.swap(self.cpu.rl);
                 2
             }
             0x36 => {
-                let val = self.get(self.cpu.hl());
-                self.set(self.cpu.hl(), swap(val));
-                self.cpu.set_flag(CFlag::Z, (self.cpu.rl == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                let val = self.cpu.swap(self.get(self.cpu.hl()));
+                self.set(self.cpu.hl(), val);
                 4
             }
             0x37 => {
-                self.cpu.ra = swap(self.cpu.ra);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
-                self.cpu.clear_flag(CFlag::H);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.ra = self.cpu.swap(self.cpu.ra);
                 2
             }
             0x7C => {
@@ -1361,7 +1187,6 @@ impl Runtime<'_> {
             }
             0x9F => res(&mut self.cpu.ra, 3),
 
-
             0xA0 => res(&mut self.cpu.rb, 4),
             0xA1 => res(&mut self.cpu.rc, 4),
             0xA2 => res(&mut self.cpu.rd, 2),
@@ -1418,7 +1243,6 @@ impl Runtime<'_> {
             }
             0xBF => res(&mut self.cpu.ra, 7),
 
-
             _ => {
                 panic!("ERROR: Opcode CB{} not implemented", b64(opcode));
             }
@@ -1459,9 +1283,7 @@ impl Runtime<'_> {
             0x7FFF => {
                 // panic!("DANGER!");
             }
-            0x8000..=0x9FFF => {
-                self.vram[(addr - 0x8000) as usize] = val
-            }
+            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
             _ => {
                 // panic!("Access to unknown memory region {}", addr)
@@ -1471,6 +1293,7 @@ impl Runtime<'_> {
 
     // STACK
     fn stack_push_u16(&mut self, value: u16) {
+        // println!("Push: {}", value);
         let (h, l) = split_u16(value);
         self.stack_push(h);
         self.stack_push(l);
@@ -1488,13 +1311,22 @@ impl Runtime<'_> {
     fn stack_pop_u16(&mut self) -> u16 {
         let l = self.stack_pop();
         let h = self.stack_pop();
-        return join_u8(h, l);
+        let val = join_u8(h, l);
+        // println!("Pop: {}", val);
+        return val;
     }
 }
 
 fn res(reg: &mut u8, pos: u8) -> u8 {
     *reg = set_bit(*reg, pos, false);
     2
+}
+
+fn add_u16(a: u16, b: u16) -> (u16, u16) {
+    let res = a as u32 + b as u32;
+    let cy = (res & (1 << 16)) >> 16;
+
+    return (cy as u16, res as u16);
 }
 
 #[cfg(test)]
@@ -1505,5 +1337,109 @@ mod tests {
     fn test_b64_returns_b64_numbers() {
         assert_eq!(b64(0xFFu16), "0x00FF".to_string());
         assert_eq!(b64(0x3Au16), "0x003A".to_string());
+    }
+
+    #[test]
+    fn test_add_ra() {
+        let mut cpu = CpuRegisters::new();
+        cpu.add_ra(1);
+        assert_eq!(cpu.ra, 1);
+    }
+
+    #[test]
+    fn test_add_ra_with_starting_value() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 6;
+        cpu.add_ra(1);
+        assert_eq!(cpu.ra, 7);
+    }
+
+    #[test]
+    fn test_add_ra_wraps() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b11111111;
+        cpu.add_ra(1);
+        assert_eq!(cpu.ra, 0);
+    }
+
+    #[test]
+    fn test_add_ra_sets_zero_flag() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b11111111;
+        cpu.add_ra(1);
+
+        assert_eq!(0x1, cpu.get_flag(CFlag::Z));
+    }
+
+    #[test]
+    fn test_add_ra_clears_zero_flag() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b11111110;
+        cpu.add_ra(1);
+
+        assert_eq!(0x0, cpu.get_flag(CFlag::Z));
+    }
+
+    #[test]
+    fn test_sets_carry() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b11111111;
+        cpu.add_ra(1);
+
+        assert_eq!(0x1, cpu.get_flag(CFlag::CY));
+    }
+
+    #[test]
+    fn test_sets_half_carry() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b1111;
+        cpu.add_ra(1);
+        assert_eq!(0x1, cpu.get_flag(CFlag::H));
+    }
+
+    #[test]
+    fn test_clears_half_carry() {
+        let mut cpu = CpuRegisters::new();
+        cpu.ra = 0b111;
+        cpu.add_ra(1);
+        assert_eq!(0x0, cpu.get_flag(CFlag::H));
+    }
+
+    #[test]
+    fn test_res_changes_inplace() {
+        let mut val = 0b111;
+        res(&mut val, 1);
+        assert_eq!(val, 0b101);
+    }
+
+    #[test]
+    fn test_jr_jumps_ahead() {
+        let mut cpu = CpuRegisters::new();
+        cpu.jr(10);
+        assert_eq!(cpu.pc, 10);
+    }
+
+    #[test]
+    fn test_jr_jumps_behind() {
+        let mut cpu = CpuRegisters::new();
+        cpu.pc = 10;
+        cpu.jr(-2);
+        assert_eq!(cpu.pc, 8);
+    }
+
+    #[test]
+    fn test_add_u16_has_carry() {
+        let max = ((1 << 16) -1) as u16;
+        let (cy, res) = add_u16(max, max);
+
+        assert_eq!(cy, 1);
+    }
+
+    #[test]
+    fn test_add_u16_wraps_result() {
+        let max = ((1 << 16) - 1) as u16;
+        let (cy, res) = add_u16(max, max);
+
+        assert_eq!(res, (max as u32 * 2) as u16);
     }
 }

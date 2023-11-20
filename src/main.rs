@@ -283,7 +283,8 @@ impl PPU {
 }
 
 fn main() {
-    let game_rom = load_rom("Tetris.gb");
+    // let game_rom = load_rom("Tetris.gb");
+    let game_rom = load_rom("cpu_instrs.gb");
     let bootstrap = load_rom("DMG_ROM.bin");
 
     let mut rt = runtime::Runtime::load(&bootstrap, &game_rom);
@@ -345,60 +346,3 @@ fn main() {
     }
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_get_tile_addr() {
-        let got = get_tile_addr(0, 0, 0, 0);
-        assert_eq!(got, 0);
-    }
-
-    #[test]
-    fn test_moves_in_x() {
-        let got = get_tile_addr(1, 0, 0, 0);
-        assert_eq!(got, 16);
-    }
-
-    #[test]
-    fn test_moves_in_y() {
-        let got = get_tile_addr(0, 0, 8, 0);
-        assert_eq!(got, 32 * 8 * 2);
-    }
-
-    #[test]
-    fn test_moves_in_tile_lines() {
-        let got = get_tile_addr(0, 0, 1, 0);
-        assert_eq!(got, 2);
-    }
-
-    #[test]
-    fn test_moves_in_tile_lines_with_scy() {
-        let got = get_tile_addr(0, 0, 0, 1);
-        assert_eq!(got, 2);
-    }
-
-    #[test]
-    fn test_moves_in_tile_lines_with_scy_intraline() {
-        let got = get_tile_addr(0, 0, 8, 1);
-        assert_eq!(got, 32 * 8 * 2 + 2);
-    }
-
-    #[test]
-    fn test_moves_scx_tile_by_tile() {
-        let got = get_tile_addr(1, 0, 8, 1);
-        assert_eq!(got, 32 * 8 * 2 + 2 + 16);
-    }
-    #[test]
-    fn test_selects_limit_right() {
-        let got = get_tile_addr(31, 0, 32 * 4, 32 * 3 + 31);
-        assert_eq!(got, 32 * 16 * 32 - 2);
-    }
-
-    #[test]
-    fn test_moves_horizontally_with_scx() {
-        let got = get_tile_addr(0, 1, 0, 0);
-        assert_eq!(got, 16);
-    }
-}
