@@ -66,6 +66,15 @@ impl CpuRegisters {
         self.rh = h;
         self.rl = l;
     }
+
+    fn add_ra(&mut self, val: u8) {
+        let res = self.ra as u16 + val as u16;
+        self.ra = (res & 0b11111111) as u8;
+        self.set_flag(CFlag::Z, (res == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::CY, ((res & (1 << 9)) >> 9) as u8);
+        // self.set_flag(CFlag::H, 0);
+    }
 }
 
 pub struct Runtime<'a> {
@@ -660,62 +669,38 @@ impl Runtime<'_> {
                 1
             }
             0x80 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.rb);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
-                // TODO set carry & half-carry
+                self.cpu.add_ra(self.cpu.rb);
                 1
             }
-            // 0x83 => {
-            //     self.cpu.ra = self.cpu.re | self.cpu.ra;
-            //     self.cpu.set_flag(CFlag::S, 0);
-            //     self.cpu.set_flag(CFlag::CY, 0);
-            //     self.cpu.set_flag(CFlag::H, 0);
-            //     self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-            //     1
-            // }
             0x81 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.rc);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.rc);
                 1
             }
             0x82 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.rd);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.rd);
                 1
             }
             0x83 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.re);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.re);
                 1
             }
             0x84 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.rh);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.rh);
                 1
             }
             0x85 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.rl);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.rl);
                 1
             }
             0x86 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.get(self.cpu.hl()));
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
+                self.cpu.add_ra(self.get(self.cpu.hl()));
                 2
             }
             0x87 => {
-                self.cpu.ra = self.cpu.ra.wrapping_add(self.cpu.ra);
-                self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.add_ra(self.cpu.ra);
                 1
             }
+
             0x88 => {
                 self.cpu.ra += self.cpu.rb + self.cpu.get_flag(CFlag::CY);
                 self.cpu.set_flag(CFlag::S, 0);
@@ -734,6 +719,7 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
                 1
             }
+
             0x90 => {
                 let cy = self.cpu.ra < self.cpu.rb;
                 self.cpu.ra = self.cpu.ra.wrapping_sub(self.cpu.rb);
@@ -745,9 +731,9 @@ impl Runtime<'_> {
             0xA0 => {
                 self.cpu.ra &= self.cpu.rb;
                 self.cpu.set_flag(CFlag::Z, (self.cpu.ra == 0) as u8);
-                self.cpu.clear_flag(CFlag::S);
+                self.cpu.set_flag(CFlag::S, 0);
                 self.cpu.set_flag(CFlag::H, 1);
-                self.cpu.clear_flag(CFlag::CY);
+                self.cpu.set_flag(CFlag::CY, 0);
                 1
             }
             0xA1 => {
