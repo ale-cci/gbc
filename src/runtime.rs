@@ -447,7 +447,7 @@ impl Runtime<'_> {
                 1
             }
             0x4B => {
-                self.cpu.rc = self.cpu.rb;
+                self.cpu.rc = self.cpu.re;
                 1
             }
             0x4C => {
@@ -499,7 +499,7 @@ impl Runtime<'_> {
                 1
             }
             0x58 => {
-                self.cpu.rb = self.cpu.re;
+                self.cpu.re = self.cpu.rb;
                 1
             }
             0x59 => {
@@ -600,6 +600,10 @@ impl Runtime<'_> {
             }
             0x71 => {
                 self.set(self.cpu.hl(), self.cpu.rc);
+                2
+            }
+            0x72 => {
+                self.set(self.cpu.hl(), self.cpu.rd);
                 2
             }
             0x73 => {
