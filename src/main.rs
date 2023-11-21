@@ -202,7 +202,7 @@ impl PPU {
         let bg_tilemap = get_bit(self.r_control, 3);
 
         let tile_id = rt.get(self.tile_offset(bg_tilemap) + tile_addr);
-        let ttr = self.get_tile(tile_id, self.ly + self.scy);
+        let ttr = self.get_tile(tile_id, (self.ly as u16 + self.scy as u16) as u8);
         self.render_tile(display, &rt, ttr, self.x, self.ly);
 
         let window_enable = get_bit(self.r_control, 5) == 1;
