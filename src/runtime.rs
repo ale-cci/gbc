@@ -94,7 +94,7 @@ impl CpuRegisters {
     fn set_af(&mut self, val: u16) {
         let (h, l) = split_u16(val);
         self.ra = h;
-        self.rf = l;
+        self.rf = l & 0b11110000;
     }
 
     fn de(&self) -> u16 {
