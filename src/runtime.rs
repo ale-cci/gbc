@@ -80,15 +80,34 @@ impl CpuRegisters {
     }
 
     fn daa(&mut self) {
-        let l = self.ra & 0b1111;
-        let h = self.ra >> 4;
+        // blindly implemented & tested following:
+        // https://ehaskins.com/2018-01-30%20Z80%20DAA/
+        // https://forums.nesdev.org/viewtopic.php?t=15944
+        let h_flag = self.get_flag(CFlag::H) == 1;
+        let c_flag = self.get_flag(CFlag::CY) == 1;
+        let n_flag = self.get_flag(CFlag::S) == 1;
 
-        if l > 10 {
-            self.ra = (l - 10) + (h.wrapping_add(1) << 4)
+        let mut cy = c_flag as u8;
+        if !n_flag {
+            if c_flag || self.ra > 0x99 {
+                self.ra = self.ra.wrapping_add(0x60);
+                cy = 1;
+            }
+            if h_flag || ((self.ra & 0xF )> 0x9){
+                self.ra = self.ra.wrapping_add(0x6);
+            }
+        } else {
+            if c_flag {
+                self.ra = self.ra.wrapping_sub(0x60);
+            }
+            if h_flag {
+                self.ra = self.ra.wrapping_sub(0x6);
+            }
         }
 
         self.set_flag(CFlag::Z, (self.ra == 0)as u8);
         self.set_flag(CFlag::H, 0);
+        self.set_flag(CFlag::CY, cy);
     }
 
     fn set_af(&mut self, val: u16) {
@@ -312,7 +331,7 @@ impl Runtime<'_> {
             None => None,
         };
 
-        if self.boot_rom_disabled() {
+        if false && self.boot_rom_disabled() {
             println!(
                 "{:?} ({} {} {} {})",
                 self.cpu,

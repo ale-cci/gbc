@@ -283,9 +283,9 @@ impl PPU {
 }
 
 fn main() {
-    let game_rom = load_rom("Tetris.gb");
+    // let game_rom = load_rom("Tetris.gb");
     // let game_rom = load_rom("cpu_instrs.gb");
-    // let game_rom = load_rom("01-special.gb");
+    let game_rom = load_rom("01-special.gb");
     let bootstrap = load_rom("DMG_ROM.bin");
 
     let mut rt = runtime::Runtime::load(&bootstrap, &game_rom);
