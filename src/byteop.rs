@@ -47,9 +47,6 @@ pub fn b64<T: Into<u16>>(arg: T) -> String {
         num >>= 8;
     }
 
-    chars.push('x');
-    chars.push('0');
-
     return String::from_iter(chars.into_iter().rev());
 }
 
