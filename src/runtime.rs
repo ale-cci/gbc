@@ -312,27 +312,26 @@ impl Runtime<'_> {
             None => None,
         };
 
-        let interrupts = self.get(0xFF0F) & self.get(0xFFFF);
+        let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
 
         if self.cpu.ime && interrupts != 0 {
             self.cpu.ime = false;
             self.stack_push_u16(self.cpu.pc);
 
             // $40, $48, $50, $58, $60
-            if get_bit(interrupts, 4) == 1 {
-                // joypad
+            if get_bit(interrupts, 0) == 1 {
                 self.cpu.pc = 0x40;
             }
-            else if get_bit(interrupts, 3) == 1 {
+            else if get_bit(interrupts, 1) == 1 {
                 self.cpu.pc = 0x48;
             }
             else if get_bit(interrupts, 2) == 1 {
                 self.cpu.pc = 0x50;
             }
-            else if get_bit(interrupts, 1) == 1 {
+            else if get_bit(interrupts, 3) == 1 {
                 self.cpu.pc = 0x58;
             }
-            else if get_bit(interrupts, 0) == 1 {
+            else if get_bit(interrupts, 4) == 1 {
                 self.cpu.pc = 0x60;
             }
         }
