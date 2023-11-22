@@ -271,7 +271,6 @@ pub struct Runtime<'a> {
     wram: Vec<u8>,
 
     hwcfg: u8,
-    _timeout: Option<u16>,
 }
 
 impl Runtime<'_> {
@@ -284,15 +283,11 @@ impl Runtime<'_> {
             wram: vec![0; 0xffff - 0x8000 + 1],
 
             hwcfg: 0x0,
-            _timeout: None,
         };
 
         // https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
         rt.hwcfg = rt.get(0x0147);
         return rt;
-    }
-    fn countdown(&mut self, cd: u16) {
-        self._timeout = Some(cd);
     }
 
     fn next_opcode(&mut self) -> u8 {
@@ -301,17 +296,34 @@ impl Runtime<'_> {
         return opcode;
     }
 
-    pub fn tick(&mut self) -> u8 {
-        self._timeout = match self._timeout {
-            Some(value) => {
-                if value == 0 {
-                    panic!("Countdown reached zero");
-                }
-                Some(value - 1)
-            }
-            None => None,
+    pub fn timer_tick(&mut self, ticks: u8) {
+        let tima = self.get(0xFF05);
+        let tma = self.get(0xFF06);
+        let tac = self.get(0xFF07);
+
+        let clock_speed = tac & 0b11;
+        let cc = match clock_speed {
+            0b00 => 1024,
+            0b01 => 16,
+            0b10 => 64,
+            0b11 => 256,
         };
 
+
+        if get_bit(tac, 2) == 0x1 {
+
+            if tima == 0xFF {
+                self.set(0xFF04, tma);
+                let interrupt_flag = self.get(0xFF0F) | 0b100;
+                self.set(0xFF0F, interrupt_flag);
+            } else {
+                self.set(0xFF04, tima + 1);
+            }
+        }
+
+    }
+
+    pub fn tick(&mut self) -> u8 {
         let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
 
         if self.cpu.ime && interrupts != 0 {
@@ -1513,6 +1525,9 @@ impl Runtime<'_> {
             // }
             0x7FFF => {
                 // panic!("DANGER!");
+            }
+            0xFF04 => {
+                self.wram[(addr - 0xA000)] = 0;
             }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,

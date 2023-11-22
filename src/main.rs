@@ -329,6 +329,8 @@ fn main() {
 
         if tick.elapsed() > clock_target {
             let cc = rt.tick();
+            rt.timer_tick(cc);
+
             if ppu.update(&rt, cc) {
                 ppu.render(&mut rt, &mut display);
             }
