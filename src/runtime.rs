@@ -312,6 +312,31 @@ impl Runtime<'_> {
             None => None,
         };
 
+        let interrupts = self.get(0xFF0F) & self.get(0xFFFF);
+
+        if self.cpu.ime && interrupts != 0 {
+            self.cpu.ime = false;
+            self.stack_push_u16(self.cpu.pc);
+
+            // $40, $48, $50, $58, $60
+            if get_bit(interrupts, 4) == 1 {
+                // joypad
+                self.cpu.pc = 0x40;
+            }
+            else if get_bit(interrupts, 3) == 1 {
+                self.cpu.pc = 0x48;
+            }
+            else if get_bit(interrupts, 2) == 1 {
+                self.cpu.pc = 0x50;
+            }
+            else if get_bit(interrupts, 1) == 1 {
+                self.cpu.pc = 0x58;
+            }
+            else if get_bit(interrupts, 0) == 1 {
+                self.cpu.pc = 0x60;
+            }
+        }
+
         if self.boot_rom_disabled() {
             println!(
                 "{:?} ({} {} {} {})",
@@ -1128,6 +1153,11 @@ impl Runtime<'_> {
                 } else {
                     2
                 }
+            }
+            0xD9 => {
+                self.cpu.pc = self.stack_pop_u16();
+                self.cpu.ime = true;
+                4
             }
             0xE0 => {
                 let addr = 0xFF00 + self.next_opcode() as u16;
