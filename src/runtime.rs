@@ -1,5 +1,7 @@
+use crate::memory::{Memory, MMU};
 use crate::byteop::*;
 use std::fmt;
+use crate::timer::Timer;
 
 struct CpuRegisters {
     ra: u8,
@@ -283,64 +285,95 @@ impl CpuRegisters {
 }
 
 pub struct Runtime<'a> {
+    memory: MMU<'a>,
     cpu: CpuRegisters,
     rom: &'a Vec<u8>,
     bootstrap: &'a Vec<u8>,
-    pub vram: Vec<u8>,
+    vram: Vec<u8>,
     wram: Vec<u8>,
 
+    timer: Timer,
     hwcfg: u8,
+}
+
+impl Memory for Runtime<'_> {
+    fn get(&self, addr: u16) -> u8 {
+        return match addr {
+            0x0000..=0x00FF => {
+                if self.boot_rom_disabled() {
+                    self.rom[addr as usize]
+                } else {
+                    self.bootstrap[addr as usize]
+                }
+            }
+            // 0xFF44 => { 0x90 }
+            0x0100..=0x3FFF => self.rom[addr as usize],
+            0x4000..=0x7FFF => self.rom[addr as usize],
+            0x8000..=0x9FFF => {
+                // rom + offset
+                self.vram[(addr - 0x8000) as usize]
+            }
+            // 0xE000..=0xFDFF => {
+            //     self.wram[addr as usize - 0xA000 - 0x2000]
+            // }
+            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
+            _ => {
+                panic!("Memory access out of bounds! {}", b64(addr));
+            }
+        };
+    }
+
+    fn set(&mut self, addr: u16, val: u8) -> () {
+        match addr {
+            0x0000..=0x3FFF => {
+                println!("Write on RO memory ({}): {}", b64(addr), b64(val));
+            }
+           //  0xE000..=0xFDFF => {
+           //      self.wram[addr as usize - 0xA000 - 0x2000] = val;
+            // }
+            0x7FFF => {
+                // panic!("DANGER!");
+            }
+            0xFF04 => {
+                self.wram[addr as usize - 0xA000] = 0;
+            }
+            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
+            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
+            _ => {
+                // panic!("Access to unknown memory region {}", addr)
+            }
+        }
+    }
+
 }
 
 impl Runtime<'_> {
     pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a Vec<u8>) -> Runtime<'a> {
-        let mut rt = Runtime {
+        let rt = Runtime {
             cpu: CpuRegisters::new(),
             rom,
             bootstrap,
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
 
+            memory: MMU::new(&bootstrap, &rom),
+            timer: Timer::new(),
             hwcfg: 0x0,
         };
 
         // https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
-        rt.hwcfg = rt.get(0x0147);
         return rt;
     }
 
+    fn tick_timer(&mut self, ticks: u8) {
+        self.timer.tick(&mut self.memory, ticks);
+    }
     fn next_opcode(&mut self) -> u8 {
         let opcode = self.get(self.cpu.pc);
         self.cpu.pc += 1;
         return opcode;
     }
 
-    pub fn timer_tick(&mut self, ticks: u8) {
-        let tima = self.get(0xFF05);
-        let tma = self.get(0xFF06);
-        let tac = self.get(0xFF07);
-
-        let clock_speed = tac & 0b11;
-        let cc = match clock_speed {
-            0b00 => 1024,
-            0b01 => 16,
-            0b10 => 64,
-            0b11 => 256,
-            _ => panic!("Unhandled clock speed configuration"),
-        };
-
-        if get_bit(tac, 2) == 0x1 {
-
-            if tima == 0xFF {
-                self.set(0xFF04, tma);
-                let interrupt_flag = self.get(0xFF0F) | 0b100;
-                self.set(0xFF0F, interrupt_flag);
-            } else {
-                self.set(0xFF04, tima + 1);
-            }
-        }
-
-    }
 
     pub fn tick(&mut self) -> u8 {
         let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
@@ -1508,53 +1541,6 @@ impl Runtime<'_> {
         return self.get(0xFF50) == 1;
     }
     // RAM
-    pub fn get(&self, addr: u16) -> u8 {
-        return match addr {
-            0x0000..=0x00FF => {
-                if self.boot_rom_disabled() {
-                    self.rom[addr as usize]
-                } else {
-                    self.bootstrap[addr as usize]
-                }
-            }
-            // 0xFF44 => { 0x90 }
-            0x0100..=0x3FFF => self.rom[addr as usize],
-            0x4000..=0x7FFF => self.rom[addr as usize],
-            0x8000..=0x9FFF => {
-                // rom + offset
-                self.vram[(addr - 0x8000) as usize]
-            }
-            // 0xE000..=0xFDFF => {
-            //     self.wram[addr as usize - 0xA000 - 0x2000]
-            // }
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
-            _ => {
-                panic!("Memory access out of bounds! {}", b64(addr));
-            }
-        };
-    }
-
-    pub fn set(&mut self, addr: u16, val: u8) -> () {
-        match addr {
-            0x0000..=0x3FFF => {
-                println!("Write on RO memory ({}): {}", b64(addr), b64(val));
-            }
-           //  0xE000..=0xFDFF => {
-           //      self.wram[addr as usize - 0xA000 - 0x2000] = val;
-            // }
-            0x7FFF => {
-                // panic!("DANGER!");
-            }
-            0xFF04 => {
-                self.wram[addr as usize - 0xA000] = 0;
-            }
-            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
-            _ => {
-                // panic!("Access to unknown memory region {}", addr)
-            }
-        }
-    }
 
     // STACK
     fn stack_push_u16(&mut self, value: u16) {
