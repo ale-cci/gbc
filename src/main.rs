@@ -14,6 +14,14 @@ use sdl2::render::Canvas;
 mod byteop;
 use crate::byteop::*;
 use std::time;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Args {
+    #[arg()]
+    rom: String,
+}
 
 fn load_rom(filename: &str) -> Vec<u8> {
     let mut f = fs::File::open(filename).expect(&format!(
@@ -285,7 +293,9 @@ impl PPU {
 fn main() {
     // let game_rom = load_rom("Tetris.gb");
     // let game_rom = load_rom("cpu_instrs.gb");
-    let game_rom = load_rom("02-interrupts.gb");
+    let args = Args::parse();
+
+    let game_rom = load_rom(&args.rom);
     let bootstrap = load_rom("DMG_ROM.bin");
 
     let mut rt = runtime::Runtime::load(&bootstrap, &game_rom);

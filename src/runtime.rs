@@ -326,6 +326,7 @@ impl Runtime<'_> {
             0b01 => 16,
             0b10 => 64,
             0b11 => 256,
+            _ => panic!("Unhandled clock speed configuration"),
         };
 
         if get_bit(tac, 2) == 0x1 {
@@ -1545,7 +1546,7 @@ impl Runtime<'_> {
                 // panic!("DANGER!");
             }
             0xFF04 => {
-                self.wram[(addr - 0xA000)] = 0;
+                self.wram[addr as usize - 0xA000] = 0;
             }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
