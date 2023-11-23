@@ -1,4 +1,4 @@
 /target
 rom.gb
-*.gb
-*.gbc
+/*.gb
+/*.gbc
