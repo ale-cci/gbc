@@ -285,7 +285,7 @@ impl PPU {
 fn main() {
     // let game_rom = load_rom("Tetris.gb");
     // let game_rom = load_rom("cpu_instrs.gb");
-    let game_rom = load_rom("01-special.gb");
+    let game_rom = load_rom("02-interrupts.gb");
     let bootstrap = load_rom("DMG_ROM.bin");
 
     let mut rt = runtime::Runtime::load(&bootstrap, &game_rom);
@@ -329,6 +329,8 @@ fn main() {
 
         if tick.elapsed() > clock_target {
             let cc = rt.tick();
+            rt.timer_tick(cc);
+
             if ppu.update(&rt, cc) {
                 ppu.render(&mut rt, &mut display);
             }
