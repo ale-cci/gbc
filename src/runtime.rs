@@ -115,7 +115,7 @@ impl CpuRegisters {
     fn set_af(&mut self, val: u16) {
         let (h, l) = split_u16(val);
         self.ra = h;
-        self.rf = l & 0b11110000;
+        self.rf = l & 0xF0;
     }
 
     fn de(&self) -> u16 {
@@ -298,51 +298,11 @@ pub struct Runtime<'a> {
 
 impl Memory for Runtime<'_> {
     fn get(&self, addr: u16) -> u8 {
-        return match addr {
-            0x0000..=0x00FF => {
-                if self.boot_rom_disabled() {
-                    self.rom[addr as usize]
-                } else {
-                    self.bootstrap[addr as usize]
-                }
-            }
-            // 0xFF44 => { 0x90 }
-            0x0100..=0x3FFF => self.rom[addr as usize],
-            0x4000..=0x7FFF => self.rom[addr as usize],
-            0x8000..=0x9FFF => {
-                // rom + offset
-                self.vram[(addr - 0x8000) as usize]
-            }
-            // 0xE000..=0xFDFF => {
-            //     self.wram[addr as usize - 0xA000 - 0x2000]
-            // }
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
-            _ => {
-                panic!("Memory access out of bounds! {}", b64(addr));
-            }
-        };
+        self.memory.get(addr)
     }
 
     fn set(&mut self, addr: u16, val: u8) -> () {
-        match addr {
-            0x0000..=0x3FFF => {
-                println!("Write on RO memory ({}): {}", b64(addr), b64(val));
-            }
-           //  0xE000..=0xFDFF => {
-           //      self.wram[addr as usize - 0xA000 - 0x2000] = val;
-            // }
-            0x7FFF => {
-                // panic!("DANGER!");
-            }
-            0xFF04 => {
-                self.wram[addr as usize - 0xA000] = 0;
-            }
-            0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
-            _ => {
-                // panic!("Access to unknown memory region {}", addr)
-            }
-        }
+        self.memory.set(addr, val);
     }
 
 }
@@ -365,7 +325,7 @@ impl Runtime<'_> {
         return rt;
     }
 
-    fn tick_timer(&mut self, ticks: u8) {
+    pub fn tick_timer(&mut self, ticks: u8) {
         self.timer.tick(&mut self.memory, ticks);
     }
     fn next_opcode(&mut self) -> u8 {
@@ -382,7 +342,7 @@ impl Runtime<'_> {
             self.cpu.ime = false;
             self.stack_push_u16(self.cpu.pc);
 
-            // $40, $48, $50, $58, $60
+            // priority goes from lsb to msb
             if get_bit(interrupts, 0) == 1 {
                 self.cpu.pc = 0x40;
             }
@@ -1714,8 +1674,8 @@ mod tests {
         let mut cpu = CpuRegisters::new();
         cpu.set_af(0x1234);
         
-        assert_eq!(cpu.af(), 0x1234);
+        assert_eq!(cpu.af(), 0x1234 & 0xFFF0);
         assert_eq!(cpu.ra, 0x12);
-        assert_eq!(cpu.rf, 0x34);
+        assert_eq!(cpu.rf, 0x34 & 0xF0);
     }
 }

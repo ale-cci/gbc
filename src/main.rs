@@ -81,8 +81,10 @@ fn main() {
 
         if tick.elapsed() > clock_target {
             let cc = rt.tick();
+            // rt.tick_timer(cc);
             ppu.update(&mut rt, cc, &mut display);
         }
+
         tick = time::Instant::now();
 
         // Refresh 60fps
