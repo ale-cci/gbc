@@ -287,13 +287,8 @@ impl CpuRegisters {
 pub struct Runtime<'a> {
     memory: MMU<'a>,
     cpu: CpuRegisters,
-    rom: &'a Vec<u8>,
-    bootstrap: &'a Vec<u8>,
-    vram: Vec<u8>,
-    wram: Vec<u8>,
 
     timer: Timer,
-    hwcfg: u8,
 }
 
 impl Memory for Runtime<'_> {
@@ -311,14 +306,9 @@ impl Runtime<'_> {
     pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a Vec<u8>) -> Runtime<'a> {
         let rt = Runtime {
             cpu: CpuRegisters::new(),
-            rom,
-            bootstrap,
-            vram: vec![0; 0x9fff - 0x8000 + 1],
-            wram: vec![0; 0xffff - 0x8000 + 1],
 
             memory: MMU::new(&bootstrap, &rom),
             timer: Timer::new(),
-            hwcfg: 0x0,
         };
 
         // https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
