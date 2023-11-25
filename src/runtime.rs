@@ -1323,12 +1323,38 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::H, 0);
                 2
             }
+            0x18 => {
+                self.cpu.rb = self.cpu.rr(self.cpu.rb);
+                2
+            }
             0x19 => {
                 self.cpu.rc = self.cpu.rr(self.cpu.rc);
                 2
             }
             0x1A => {
                 self.cpu.rd = self.cpu.rr(self.cpu.rd);
+                2
+            }
+            0x1B => {
+                self.cpu.re = self.cpu.rr(self.cpu.re);
+                2
+            }
+            0x1C => {
+                self.cpu.rh = self.cpu.rr(self.cpu.rh);
+                2
+            }
+            0x1D => {
+                self.cpu.rl = self.cpu.rr(self.cpu.rl);
+                2
+            }
+            0x1E => {
+                let hl = self.get(self.cpu.hl());
+                let hl = self.cpu.rr(hl);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0x1F => {
+                self.cpu.rf = self.cpu.rr(self.cpu.rf);
                 2
             }
             0x30 => {
