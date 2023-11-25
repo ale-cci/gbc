@@ -172,7 +172,8 @@ impl CpuRegisters {
 
     fn sra(&mut self, val: u8) -> u8 {
         let lsb = get_bit(val, 0);
-        let res = val >> 1;
+        let b7 = get_bit(val, 7);
+        let res = (val >> 1) + (b7 << 7);
 
         self.set_flag(CFlag::Z, (res == 0) as u8);
         self.set_flag(CFlag::S, 0);
@@ -298,12 +299,6 @@ impl CpuRegisters {
         self.set_flag(CFlag::CY, 0);
         1
     }
-
-    fn rra(&mut self) {
-        self.ra = self.rr(self.ra);
-        self.set_flag(CFlag::Z, 0);
-    }
-
     fn rr(&mut self, val: u8) -> u8 {
         // rotate right through CY
         let b0 = val & 0x1;
@@ -317,7 +312,7 @@ impl CpuRegisters {
     }
     fn rrc(&mut self, val: u8) -> u8 {
         let lsb = get_bit(val, 0);
-        let res = (val >> 1) + lsb;
+        let res = (val >> 1) + (lsb << 7);
 
         self.set_flag(CFlag::Z, (res == 0) as u8);
         self.set_flag(CFlag::S, 0);
@@ -534,14 +529,8 @@ impl Runtime<'_> {
                 2
             }
             0x0F => {
-                let lsb = self.cpu.ra & 0b1;
-                let cy = self.cpu.get_flag(CFlag::CY);
-                self.cpu.ra = (self.cpu.ra >> 1) + (cy << 7);
-                self.cpu.set_flag(CFlag::CY, lsb);
-
+                self.cpu.ra = self.cpu.rrc(self.cpu.ra);
                 self.cpu.set_flag(CFlag::Z, 0);
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::H, 0);
                 1
             }
             0x10 => {
@@ -619,7 +608,8 @@ impl Runtime<'_> {
                 2
             }
             0x1F => {
-                self.cpu.rra();
+                self.cpu.ra = self.cpu.rr(self.cpu.ra);
+                self.cpu.set_flag(CFlag::Z, 0);
                 1
             }
             0x20 => {
@@ -773,6 +763,11 @@ impl Runtime<'_> {
                 self.cpu.set_flag(CFlag::H, hc);
                 self.cpu.set_flag(CFlag::CY, cy);
 
+                2
+            }
+            0x3A => {
+                self.cpu.ra = self.get(self.cpu.hl());
+                self.cpu.set_hl(self.cpu.hl().wrapping_sub(1));
                 2
             }
             0x3B => {
@@ -1754,7 +1749,7 @@ impl Runtime<'_> {
 
             0xA0 => res(&mut self.cpu.rb, 4),
             0xA1 => res(&mut self.cpu.rc, 4),
-            0xA2 => res(&mut self.cpu.rd, 2),
+            0xA2 => res(&mut self.cpu.rd, 4),
             0xA3 => res(&mut self.cpu.re, 4),
             0xA4 => res(&mut self.cpu.rh, 4),
             0xA5 => res(&mut self.cpu.rl, 4),
@@ -1816,7 +1811,7 @@ impl Runtime<'_> {
             0xC5 => set(&mut self.cpu.rl, 0),
             0xC6 => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 6, false);
+                let hl = set_bit(hl, 0, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1830,7 +1825,7 @@ impl Runtime<'_> {
             0xCD => set(&mut self.cpu.rl, 1),
             0xCE => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 7, false);
+                let hl = set_bit(hl, 1, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1845,7 +1840,7 @@ impl Runtime<'_> {
             0xD5 => set(&mut self.cpu.rl, 2),
             0xD6 => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 6, false);
+                let hl = set_bit(hl, 2, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1859,7 +1854,7 @@ impl Runtime<'_> {
             0xDD => set(&mut self.cpu.rl, 3),
             0xDE => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 7, false);
+                let hl = set_bit(hl, 3, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1874,7 +1869,7 @@ impl Runtime<'_> {
             0xE5 => set(&mut self.cpu.rl, 4),
             0xE6 => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 6, false);
+                let hl = set_bit(hl, 4, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1888,7 +1883,7 @@ impl Runtime<'_> {
             0xED => set(&mut self.cpu.rl, 5),
             0xEE => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 7, false);
+                let hl = set_bit(hl, 5, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1903,7 +1898,7 @@ impl Runtime<'_> {
             0xF5 => set(&mut self.cpu.rl, 6),
             0xF6 => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 6, false);
+                let hl = set_bit(hl, 6, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1917,7 +1912,7 @@ impl Runtime<'_> {
             0xFD => set(&mut self.cpu.rl, 7),
             0xFE => {
                 let hl = self.get(self.cpu.hl());
-                let hl = set_bit(hl, 7, false);
+                let hl = set_bit(hl, 7, true);
                 self.set(self.cpu.hl(), hl);
                 4
             }
@@ -1964,13 +1959,8 @@ fn add_u16(a: u16, b: u16) -> (u8, u8, u16) {
     let res = a as u32 + b as u32;
     let cy = (res & (1 << 16)) >> 16;
 
-    // lower or higher nibble half carry
-    let ln_hc = (((a & 0xF) + (b & 0xF)) & 0x10) == 0x10;
-    let ln_hc = false;
-    let hn_hc = (((a & 0xFFF) + (b & 0xFFF)) & 0x1000) == 0x1000;
-
-    let hc = ln_hc | hn_hc;
-
+    // higher nibble half carry
+    let hc = (((a & 0xFFF) + (b & 0xFFF)) & 0x1000) == 0x1000;
     return (cy as u8, hc as u8, res as u16);
 }
 

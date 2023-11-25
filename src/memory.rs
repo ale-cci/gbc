@@ -49,6 +49,10 @@ impl Memory for MMU<'_> {
             // 0xE000..=0xFDFF => {
             //     self.wram[addr as usize - 0xA000 - 0x2000]
             // }
+            0xE000..=0xFDFF => {
+                // mirror of 0xCD00-0xDDFF
+                self.wram[addr as usize - 0xA000 - 0x2000]
+            }
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
             _ => {
                 panic!("Memory access out of bounds! {}", b64(addr));
@@ -71,6 +75,10 @@ impl Memory for MMU<'_> {
                 self.wram[addr as usize - 0xA000] = 0;
             }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
+            0xE000..=0xFDFF => {
+                // mirror of 0xCD00-0xDDFF
+                self.wram[addr as usize - 0xA000 - 0x2000] = val;
+            }
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
             _ => {
                 // panic!("Access to unknown memory region {}", addr)
