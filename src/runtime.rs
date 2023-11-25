@@ -17,6 +17,7 @@ struct CpuRegisters {
 
     ime: bool,
     debug: bool,
+    halt: bool,
 }
 
 enum CFlag {
@@ -58,6 +59,7 @@ impl CpuRegisters {
             sp: 0,
             ime: false,
             debug: false,
+            halt: false,
         }
     }
     fn set_flag(&mut self, flag: CFlag, val: u8) {
@@ -327,6 +329,14 @@ impl Runtime<'_> {
 
     pub fn tick(&mut self) -> u8 {
         let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
+
+        if self.cpu.halt {
+            if interrupts == 0 {
+                return 1;
+            } else {
+                self.cpu.halt = false;
+            }
+        }
 
         if self.cpu.ime && interrupts != 0 {
             self.cpu.ime = false;
@@ -922,9 +932,10 @@ impl Runtime<'_> {
                 2
             }
             0x76 => {
-                // HALT
-                panic!("HALTOLA!");
+                self.cpu.halt = true;
+                1
             }
+
             0x77 => {
                 self.set(self.cpu.hl(), self.cpu.ra);
                 2
