@@ -50,19 +50,21 @@ pub fn b64<T: Into<u16>>(arg: T) -> String {
     return String::from_iter(chars.into_iter().rev());
 }
 
-pub fn rlc(cy: u8, reg: u8) -> (u8, u8) {
-    let msb = get_bit(reg, 7);
-    return (
-        msb,
-        (reg << 1) + msb,
-    )
-}
-
 pub fn rl(cy: u8, reg: u8) -> (u8, u8) {
     let msb = get_bit(reg, 7);
     return (
         msb,
         (reg << 1) + cy,
     )
+}
+
+pub fn res(reg: &mut u8, pos: u8) -> u8 {
+    *reg = set_bit(*reg, pos, false);
+    2
+}
+
+pub fn set(reg: &mut u8, pos: u8) -> u8 {
+    *reg = set_bit(*reg, pos, true);
+    2
 }
 

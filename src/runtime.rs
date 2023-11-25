@@ -181,6 +181,12 @@ impl CpuRegisters {
         return res;
     }
 
+    fn bit(&mut self, val: u8, pos: u8) {
+        let value = get_bit(val, pos);
+        self.set_flag(CFlag::Z, value ^ 0x1);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, 1);
+    }
 
     fn add_u16_i8(&mut self, a: u16, b: i8) -> u16 {
         let b = b as u16;
@@ -1583,18 +1589,112 @@ impl Runtime<'_> {
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x3F => {
-                self.cpu.ra = self.cpu.srl(self.cpu.ra);
-                2
-            }
+            0x3F => { self.cpu.ra = self.cpu.srl(self.cpu.ra); 2 }
 
-            0x7C => {
-                let msb = get_bit(self.cpu.rh, 7);
-                self.cpu.set_flag(CFlag::Z, msb ^ 0b1);
-                self.cpu.set_flag(CFlag::S, 0);
-                self.cpu.set_flag(CFlag::H, 1);
-                2
+            0x40 => { self.cpu.bit(self.cpu.rb, 0); 2 }
+            0x41 => { self.cpu.bit(self.cpu.rc, 0); 2 }
+            0x42 => { self.cpu.bit(self.cpu.rd, 0); 2 }
+            0x43 => { self.cpu.bit(self.cpu.re, 0); 2 }
+            0x44 => { self.cpu.bit(self.cpu.rh, 0); 2 }
+            0x45 => { self.cpu.bit(self.cpu.rl, 0); 2 }
+            0x46 => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 0);
+                3
             }
+            0x47 => { self.cpu.bit(self.cpu.ra, 0); 2 }
+
+            0x48 => { self.cpu.bit(self.cpu.rb, 1); 2 }
+            0x49 => { self.cpu.bit(self.cpu.rc, 1); 2 }
+            0x4A => { self.cpu.bit(self.cpu.rd, 1); 2 }
+            0x4B => { self.cpu.bit(self.cpu.re, 1); 2 }
+            0x4C => { self.cpu.bit(self.cpu.rh, 1); 2 }
+            0x4D => { self.cpu.bit(self.cpu.rl, 1); 2 }
+            0x4E => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 1);
+                3
+            }
+            0x4F => { self.cpu.bit(self.cpu.ra, 1); 2 }
+
+            0x50 => { self.cpu.bit(self.cpu.rb, 2); 2 }
+            0x51 => { self.cpu.bit(self.cpu.rc, 2); 2 }
+            0x52 => { self.cpu.bit(self.cpu.rd, 2); 2 }
+            0x53 => { self.cpu.bit(self.cpu.re, 2); 2 }
+            0x54 => { self.cpu.bit(self.cpu.rh, 2); 2 }
+            0x55 => { self.cpu.bit(self.cpu.rl, 2); 2 }
+            0x56 => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 2);
+                3
+            }
+            0x57 => { self.cpu.bit(self.cpu.ra, 2); 2 }
+
+            0x58 => { self.cpu.bit(self.cpu.rb, 3); 2 }
+            0x59 => { self.cpu.bit(self.cpu.rc, 3); 2 }
+            0x5A => { self.cpu.bit(self.cpu.rd, 3); 2 }
+            0x5B => { self.cpu.bit(self.cpu.re, 3); 2 }
+            0x5C => { self.cpu.bit(self.cpu.rh, 3); 2 }
+            0x5D => { self.cpu.bit(self.cpu.rl, 3); 2 }
+            0x5E => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 3);
+                3
+            }
+            0x5F => { self.cpu.bit(self.cpu.ra, 3); 2 }
+
+            0x60 => { self.cpu.bit(self.cpu.rb, 4); 2 }
+            0x61 => { self.cpu.bit(self.cpu.rc, 4); 2 }
+            0x62 => { self.cpu.bit(self.cpu.rd, 4); 2 }
+            0x63 => { self.cpu.bit(self.cpu.re, 4); 2 }
+            0x64 => { self.cpu.bit(self.cpu.rh, 4); 2 }
+            0x65 => { self.cpu.bit(self.cpu.rl, 4); 2 }
+            0x66 => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 4);
+                3
+            }
+            0x67 => { self.cpu.bit(self.cpu.ra, 4); 2 }
+
+            0x68 => { self.cpu.bit(self.cpu.rb, 5); 2 }
+            0x69 => { self.cpu.bit(self.cpu.rc, 5); 2 }
+            0x6A => { self.cpu.bit(self.cpu.rd, 5); 2 }
+            0x6B => { self.cpu.bit(self.cpu.re, 5); 2 }
+            0x6C => { self.cpu.bit(self.cpu.rh, 5); 2 }
+            0x6D => { self.cpu.bit(self.cpu.rl, 5); 2 }
+            0x6E => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 5);
+                3
+            }
+            0x6F => { self.cpu.bit(self.cpu.ra, 5); 2 }
+
+            0x70 => { self.cpu.bit(self.cpu.rb, 6); 2 }
+            0x71 => { self.cpu.bit(self.cpu.rc, 6); 2 }
+            0x72 => { self.cpu.bit(self.cpu.rd, 6); 2 }
+            0x73 => { self.cpu.bit(self.cpu.re, 6); 2 }
+            0x74 => { self.cpu.bit(self.cpu.rh, 6); 2 }
+            0x75 => { self.cpu.bit(self.cpu.rl, 6); 2 }
+            0x76 => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 6);
+                3
+            }
+            0x77 => { self.cpu.bit(self.cpu.ra, 6); 2 }
+
+            0x78 => { self.cpu.bit(self.cpu.rb, 7); 2 }
+            0x79 => { self.cpu.bit(self.cpu.rc, 7); 2 }
+            0x7A => { self.cpu.bit(self.cpu.rd, 7); 2 }
+            0x7B => { self.cpu.bit(self.cpu.re, 7); 2 }
+            0x7C => { self.cpu.bit(self.cpu.rh, 7); 2 }
+            0x7D => { self.cpu.bit(self.cpu.rl, 7); 2 }
+            0x7E => { 
+                let hl = self.get(self.cpu.hl());
+                self.cpu.bit(hl, 7);
+                3
+            }
+            0x7F => { self.cpu.bit(self.cpu.ra, 7); 2 }
+
 
             0x80 => res(&mut self.cpu.rb, 0),
             0x81 => res(&mut self.cpu.rc, 0),
@@ -1708,6 +1808,121 @@ impl Runtime<'_> {
             }
             0xBF => res(&mut self.cpu.ra, 7),
 
+            0xC0 => set(&mut self.cpu.rb, 0),
+            0xC1 => set(&mut self.cpu.rc, 0),
+            0xC2 => set(&mut self.cpu.rd, 0),
+            0xC3 => set(&mut self.cpu.re, 0),
+            0xC4 => set(&mut self.cpu.rh, 0),
+            0xC5 => set(&mut self.cpu.rl, 0),
+            0xC6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 6, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xC7 => set(&mut self.cpu.ra, 0),
+
+            0xC8 => set(&mut self.cpu.rb, 1),
+            0xC9 => set(&mut self.cpu.rc, 1),
+            0xCA => set(&mut self.cpu.rd, 1),
+            0xCB => set(&mut self.cpu.re, 1),
+            0xCC => set(&mut self.cpu.rh, 1),
+            0xCD => set(&mut self.cpu.rl, 1),
+            0xCE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 7, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xCF => set(&mut self.cpu.ra, 1),
+
+
+            0xD0 => set(&mut self.cpu.rb, 2),
+            0xD1 => set(&mut self.cpu.rc, 2),
+            0xD2 => set(&mut self.cpu.rd, 2),
+            0xD3 => set(&mut self.cpu.re, 2),
+            0xD4 => set(&mut self.cpu.rh, 2),
+            0xD5 => set(&mut self.cpu.rl, 2),
+            0xD6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 6, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xD7 => set(&mut self.cpu.ra, 2),
+
+            0xD8 => set(&mut self.cpu.rb, 3),
+            0xD9 => set(&mut self.cpu.rc, 3),
+            0xDA => set(&mut self.cpu.rd, 3),
+            0xDB => set(&mut self.cpu.re, 3),
+            0xDC => set(&mut self.cpu.rh, 3),
+            0xDD => set(&mut self.cpu.rl, 3),
+            0xDE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 7, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xDF => set(&mut self.cpu.ra, 3),
+
+
+            0xE0 => set(&mut self.cpu.rb, 4),
+            0xE1 => set(&mut self.cpu.rc, 4),
+            0xE2 => set(&mut self.cpu.rd, 4),
+            0xE3 => set(&mut self.cpu.re, 4),
+            0xE4 => set(&mut self.cpu.rh, 4),
+            0xE5 => set(&mut self.cpu.rl, 4),
+            0xE6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 6, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xE7 => set(&mut self.cpu.ra, 4),
+
+            0xE8 => set(&mut self.cpu.rb, 5),
+            0xE9 => set(&mut self.cpu.rc, 5),
+            0xEA => set(&mut self.cpu.rd, 5),
+            0xEB => set(&mut self.cpu.re, 5),
+            0xEC => set(&mut self.cpu.rh, 5),
+            0xED => set(&mut self.cpu.rl, 5),
+            0xEE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 7, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xEF => set(&mut self.cpu.ra, 5),
+
+
+            0xF0 => set(&mut self.cpu.rb, 6),
+            0xF1 => set(&mut self.cpu.rc, 6),
+            0xF2 => set(&mut self.cpu.rd, 6),
+            0xF3 => set(&mut self.cpu.re, 6),
+            0xF4 => set(&mut self.cpu.rh, 6),
+            0xF5 => set(&mut self.cpu.rl, 6),
+            0xF6 => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 6, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xF7 => set(&mut self.cpu.ra, 6),
+
+            0xF8 => set(&mut self.cpu.rb, 7),
+            0xF9 => set(&mut self.cpu.rc, 7),
+            0xFA => set(&mut self.cpu.rd, 7),
+            0xFB => set(&mut self.cpu.re, 7),
+            0xFC => set(&mut self.cpu.rh, 7),
+            0xFD => set(&mut self.cpu.rl, 7),
+            0xFE => {
+                let hl = self.get(self.cpu.hl());
+                let hl = set_bit(hl, 7, false);
+                self.set(self.cpu.hl(), hl);
+                4
+            }
+            0xFF => set(&mut self.cpu.ra, 7),
+
             _ => {
                 panic!("ERROR: Opcode CB{} not implemented", b64(opcode));
             }
@@ -1743,11 +1958,6 @@ impl Runtime<'_> {
         // println!("Pop: {}", val);
         return val;
     }
-}
-
-fn res(reg: &mut u8, pos: u8) -> u8 {
-    *reg = set_bit(*reg, pos, false);
-    2
 }
 
 fn add_u16(a: u16, b: u16) -> (u8, u8, u16) {
