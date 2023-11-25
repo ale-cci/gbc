@@ -65,7 +65,6 @@ impl Memory for MMU<'_> {
             0x0000..=0x3FFF => {
                 println!("Write on RO memory ({}): {}", b64(addr), b64(val));
             }
-           //  0xE000..=0xFDFF => {
            //      self.wram[addr as usize - 0xA000 - 0x2000] = val;
             // }
             0x7FFF => {
@@ -79,7 +78,15 @@ impl Memory for MMU<'_> {
                 // mirror of 0xCD00-0xDDFF
                 self.wram[addr as usize - 0xA000 - 0x2000] = val;
             }
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize] = val,
+            0xA000..=0xFFFF => {
+                let val = if addr == 0xFF00 {
+                    val & 0xF0 + 0x0F
+                } else {
+                    val
+                };
+
+                self.wram[(addr - 0xA000) as usize] = val
+            },
             _ => {
                 // panic!("Access to unknown memory region {}", addr)
             }

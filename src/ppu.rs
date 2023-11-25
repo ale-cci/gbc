@@ -17,6 +17,7 @@ pub struct PPU {
     obp1: u8,
     wx: u8,
     wy: u8,
+    bgp: u8,
 
     window_line_counter: u8,
     remaining_cycles: u8,
@@ -40,9 +41,13 @@ impl PPU {
             window_line_counter: 0,
             remaining_cycles: 0,
             wait: 0,
+            bgp: 0,
         }
     }
     fn get_color(&self, id: u8) -> Color {
+        let shift = id * 2;
+        let color = (self.bgp & (0b11 << shift)) >> shift;
+
         let colors = vec![
             // Color::RGB(155, 188, 15),
             // Color::RGB(139, 172, 15),
@@ -53,7 +58,7 @@ impl PPU {
             Color::RGB(84, 84, 84),
             Color::RGB(0, 0, 0),
         ];
-        return colors[id as usize];
+        return colors[color as usize];
     }
 
     pub fn update(&mut self, rt: &mut impl Memory, cc: u8, display: &mut Display) {
@@ -63,6 +68,7 @@ impl PPU {
         self.scx = rt.get(0xFF43);
         self.ly = rt.get(0xFF44);
         self.lyc = rt.get(0xFF45); // 0..=153
+        self.bgp = rt.get(0xFF47);
         self.obp0 = rt.get(0xFF48);
         self.obp1 = rt.get(0xFF49);
         self.wy = rt.get(0xFF4A);
@@ -83,10 +89,13 @@ impl PPU {
     // render background
     fn render(&mut self, rt: &mut impl Memory, display: &mut Display) {
         let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
-        let bg_tilemap = get_bit(self.r_control, 3);
 
+        let bg_tilemap = get_bit(self.r_control, 3);
         let tile_id = rt.get(self.tile_offset(bg_tilemap) + tile_addr);
-        let ttr = self.get_tile(tile_id, (self.ly as u16 + self.scy as u16) as u8);
+
+        let ttr = self.get_tile(tile_id, (self.ly & 0b111) + (self.scy & 0b111));
+
+        // rendering background tile
         self.render_tile(display, rt, ttr, self.x, self.ly);
 
         let window_enable = get_bit(self.r_control, 5) == 1;
@@ -94,12 +103,14 @@ impl PPU {
         let window_tilemap = get_bit(self.r_control, 6);
 
         if window_enable && window_visible && self.ly == self.wy {
+            println!("Window enable???");
             let tile_addr = self.x as u16 + self.ly as u16 * 32;
             let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
             let ttr = self.get_tile(tile_id, self.ly);
             self.render_tile(display, rt, ttr, self.wx + self.x, self.wy);
         }
+
 
         self.x += 1;
         if self.x == 20 {
@@ -117,7 +128,6 @@ impl PPU {
         }
 
         let mut r_status = self.r_status;
-
         if self.ly == self.lyc {
             if get_bit(self.r_status, 6) == 1 {
                 // LYC int select Trigger interrupt if
@@ -136,22 +146,17 @@ impl PPU {
         return if id == 0 { 0x9800 } else { 0x9C00 };
     }
 
-    fn get_tile(&self, tile: u8, y: u8) -> u16 {
-        let intratile = (y & 0b111) as u16;
+    /// Calculates the memory address of the tile, given SCY & tile_numbere
+    fn get_tile(&self, tile: u8, scy: u8) -> u16 {
+        let mode_8800 = get_bit(self.r_control, 4) == 0;
 
-        if get_bit(self.r_control, 4) == 0 {
-            0x8800u16.wrapping_add((tile as i8) as u16) + intratile * 2
-        } else {
-            0x8000 + (tile as u16 * 16) + intratile * 2
-        }
+        let intratile = (scy & 0b111) as u16;
+        return tile_addr(tile, mode_8800) + (intratile * 2);
     }
 
     fn render_tile(&self, display: &mut Display, rt: &impl Memory, ttr: u16, x: u8, y: u8) {
-        let fst = rt.get(ttr + 1);
-        let snd = rt.get(ttr + 0);
-
-        // let fst = rt.get(self.bg_offset() + tile_addr);
-        // let snd = rt.get(self.bg_offset() + tile_addr + 1);
+        let fst = rt.get(ttr + 0);
+        let snd = rt.get(ttr + 1);
 
         for i in 0..8 {
             let l = get_bit(fst, i);
@@ -166,18 +171,22 @@ impl PPU {
     }
 }
 
+/// Calculate tile number from X, SCY, LY, SCY
 fn get_tile_addr(x: u8, scx: u8, ly: u8, scy: u8) -> u16 {
     let ly = ly as u16;
     let x = x as u16;
     let scy = scy as u16;
     let scx = scx as u16;
 
-    let tile_x = (x + (scx >> 3)) % 32;
-    let tile_y = ((scy + ly) >> 3) % 32;
+    let tile_x = (x + (scx >> 3)) & 0x1F;
+    let tile_y = ((scy + ly) >> 3) & 0x1F;
 
     let tile_no = tile_x + (tile_y * 32);
 
-    return tile_no & 0x3FF;
+    if tile_no > 0x3FF {
+        println!("chuckle: i'm in danger");
+    }
+    return tile_no;
 }
 
 pub struct Display {
@@ -223,3 +232,63 @@ impl Display {
     }
 }
 
+fn tile_addr(tile_id: u8, signed_mode: bool) -> u16 {
+    let b0 = 0x8000;
+    let b1 = 0x8800;
+    let b2 = 0x9000;
+
+
+    let select = get_bit(tile_id, 7) == 1;
+
+    let mut tile = tile_id;
+
+    if select {
+        if signed_mode {
+            tile = !(tile -1);
+            tile = 0x80 - tile; 
+        } else {
+            tile &= 0x7F
+        }
+    } 
+
+    let base = match (signed_mode, select) {
+        (false, false) => b0,
+        (false, true) => b1,
+
+        (true, false) => b2,
+        (true, true) => b1,
+    };
+
+    let block_addr = tile as u16 * 16;
+    return base + block_addr;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_signed_mode_128_returns_8800() {
+        let got = tile_addr(128, true);
+        assert_eq!(b64(got), "8800");
+    }
+
+    #[test]
+    fn test_signed_mode_0_returns_9000() {
+        let got = tile_addr(0, true);
+        assert_eq!(b64(got), "9000");
+    }
+
+    #[test]
+    fn test_signed_mode_127_returns_last_addr_of_block_2() {
+        let got = tile_addr(127, true);
+        assert_eq!(b64(got), "97F0");
+    }
+
+    #[test]
+    fn test_signed_mode_255_returns_last_addr_of_block_1() {
+        let got = tile_addr(0xFF, true);
+        assert_eq!(b64(got), "8FF0");
+    }
+
+}

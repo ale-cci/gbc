@@ -58,7 +58,7 @@ impl CpuRegisters {
             pc: 0,
             sp: 0,
             ime: false,
-            debug: true,
+            debug: false,
             halt: false,
         }
     }
