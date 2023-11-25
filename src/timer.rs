@@ -170,4 +170,28 @@ mod tests {
         let tima = mem.get(TIMA_ADDR);
         assert_eq!(tima, 0xF0);
     }
+
+    #[test]
+    fn test_tima() {
+        let mut timer = Timer::new();
+        let mut mem = Mem::new();
+        mem.set(TAC_ADDR, 0b101);
+        mem.set(TIMA_ADDR, 0);
+        mem.set(INT_ADDR, 0);
+
+        for _ in 0..4 {
+            timer.tick(&mut mem, 250);
+            timer.tick(&mut mem, 250);
+        }
+        timer.tick(&mut mem, 250);
+
+        assert_eq!(mem.get(0xFF0F), 0);
+
+        for _ in 0..4 {
+            timer.tick(&mut mem, 250);
+            timer.tick(&mut mem, 250);
+        }
+
+        assert_eq!(mem.get(0xFF0F), 0b100);
+    }
 }
