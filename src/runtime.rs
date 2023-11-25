@@ -342,25 +342,31 @@ impl Runtime<'_> {
             self.cpu.ime = false;
             self.stack_push_u16(self.cpu.pc);
 
+            let interrupt_flag = self.get(0xFF0F);
             // priority goes from lsb to msb
             if get_bit(interrupts, 0) == 1 {
                 self.cpu.pc = 0x40;
+                self.set(0xFF0F, set_bit(interrupt_flag, 0, false));
             }
             else if get_bit(interrupts, 1) == 1 {
                 self.cpu.pc = 0x48;
+                self.set(0xFF0F, set_bit(interrupt_flag, 1, false));
             }
             else if get_bit(interrupts, 2) == 1 {
                 self.cpu.pc = 0x50;
+                self.set(0xFF0F, set_bit(interrupt_flag, 2, false));
             }
             else if get_bit(interrupts, 3) == 1 {
                 self.cpu.pc = 0x58;
+                self.set(0xFF0F, set_bit(interrupt_flag, 3, false));
             }
             else if get_bit(interrupts, 4) == 1 {
                 self.cpu.pc = 0x60;
+                self.set(0xFF0F, set_bit(interrupt_flag, 4, false));
             }
         }
 
-        if false && self.boot_rom_disabled() {
+        if self.cpu.debug && self.boot_rom_disabled() {
             println!(
                 "{:?} ({} {} {} {})",
                 self.cpu,
@@ -1269,8 +1275,7 @@ impl Runtime<'_> {
             }
             0xF8 => {
                 let val = self.next_opcode();
-                self.cpu
-                    .set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
+                self.cpu.set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
                 self.cpu.set_flag(CFlag::Z, 0);
                 self.cpu.set_flag(CFlag::S, 0);
                 3
