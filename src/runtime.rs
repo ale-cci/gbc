@@ -29,7 +29,7 @@ enum CFlag {
 
 impl fmt::Debug for CpuRegisters {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "A: {ra} F: {rf} B: {rb} C: {rc} D: {rd} E: {re} H: {rh} L: {rl} SP: {sp} PC: 00:{pc}",
+        write!(f, "A:{ra} F:{rf} B:{rb} C:{rc} D:{rd} E:{re} H:{rh} L:{rl} SP:{sp} PC:{pc}",
                ra=b64(self.ra),
                rf=b64(self.rf),
                rb=b64(self.rb),
@@ -58,7 +58,7 @@ impl CpuRegisters {
             pc: 0,
             sp: 0,
             ime: false,
-            debug: false,
+            debug: true,
             halt: false,
         }
     }
@@ -136,6 +136,20 @@ impl CpuRegisters {
         let (h, l) = split_u16(val);
         self.rh = h;
         self.rl = l;
+    }
+
+    fn add_u16_i8(&mut self, a: u16, b: i8) -> u16 {
+        let b = b as u16;
+        let res = a.wrapping_add(b as u16);
+
+        let cy = ((a & 0xFF) + (b & 0xFF)) & 0x100 == 0x100;
+        let hc = ((a & 0xF) + (b & 0xF)) & 0x10 == 0x10;
+
+        self.set_flag(CFlag::Z, (res == 0) as u8);
+        self.set_flag(CFlag::S, 0);
+        self.set_flag(CFlag::H, hc as u8);
+        self.set_flag(CFlag::CY, cy as u8);
+        return res
     }
 
     fn srl(&mut self, val: u8) -> u8{
@@ -368,7 +382,7 @@ impl Runtime<'_> {
 
         if self.cpu.debug && self.boot_rom_disabled() {
             println!(
-                "{:?} ({} {} {} {})",
+                "{:?} PCMEM:{},{},{},{}",
                 self.cpu,
                 b64(self.get(self.cpu.pc + 0)),
                 b64(self.get(self.cpu.pc + 1)),
@@ -656,7 +670,7 @@ impl Runtime<'_> {
                 2
             }
             0x33 => {
-                self.cpu.sp += 1;
+                self.cpu.sp = self.cpu.sp.wrapping_add(1);
                 2
             }
             0x34 => {
@@ -691,8 +705,17 @@ impl Runtime<'_> {
                     2
                 }
             }
+            0x39 => {
+                let (cy, hc, res) = add_u16(self.cpu.sp, self.cpu.hl());
+                self.cpu.set_hl(res);
+                self.cpu.set_flag(CFlag::S, 0);
+                self.cpu.set_flag(CFlag::H, hc);
+                self.cpu.set_flag(CFlag::CY, cy);
+
+                2
+            }
             0x3B => {
-                self.cpu.sp -= 1;
+                self.cpu.sp = self.cpu.sp.wrapping_sub(1);
                 2
             }
             0x3C => {
@@ -1214,6 +1237,17 @@ impl Runtime<'_> {
                 self.cpu.and_ra(op);
                 2
             }
+            0xE7 => {
+                self.stack_push_u16(self.cpu.pc);
+                self.cpu.pc = 0x20;
+                4
+            }
+            0xE8 => {
+                let op = self.next_opcode() as i8;
+                self.cpu.sp = self.cpu.add_u16_i8(self.cpu.sp, op);
+                self.cpu.set_flag(CFlag::Z, 0);
+                4
+            }
 
             0xE9 => {
                 self.cpu.pc = self.cpu.hl();
@@ -1275,14 +1309,14 @@ impl Runtime<'_> {
                 4
             }
             0xF8 => {
-                let val = self.next_opcode();
-                self.cpu.set_hl(self.cpu.sp.wrapping_add((val as i8) as u16));
+                let op = self.next_opcode() as i8;
+                let res = self.cpu.add_u16_i8(self.cpu.sp, op);
+                self.cpu.set_hl(res);
                 self.cpu.set_flag(CFlag::Z, 0);
-                self.cpu.set_flag(CFlag::S, 0);
                 3
             }
             0xF9 => {
-                self.cpu.set_hl(self.cpu.sp);
+                self.cpu.sp = self.cpu.hl();
                 2
             }
             0xFA => {
@@ -1568,10 +1602,17 @@ fn res(reg: &mut u8, pos: u8) -> u8 {
 fn add_u16(a: u16, b: u16) -> (u8, u8, u16) {
     let res = a as u32 + b as u32;
     let cy = (res & (1 << 16)) >> 16;
-    let hc = ((a & 0xFFF) + (b & 0xFFF)) >> 12;
+
+    // lower or higher nibble half carry
+    let ln_hc = (((a & 0xF) + (b & 0xF)) & 0x10) == 0x10;
+    let ln_hc = false;
+    let hn_hc = (((a & 0xFFF) + (b & 0xFFF)) & 0x1000) == 0x1000;
+
+    let hc = ln_hc | hn_hc;
 
     return (cy as u8, hc as u8, res as u16);
 }
+
 
 #[cfg(test)]
 mod tests {
