@@ -5,12 +5,26 @@ pub trait Memory {
     fn set(&mut self, addr: u16, value: u8);
 }
 
+#[derive(Debug)]
+pub enum HWInput {
+    ArrLeft   = 0b001,
+    ArrRight  = 0b000,
+    ArrDown   = 0b011,
+    ArrUp     = 0b010,
+    BtnA      = 0b100,
+    BtnB      = 0b101,
+    BtnSelect = 0b110,
+    BtnStart  = 0b111,
+}
+
 pub struct MMU<'a> {
     boot_rom: &'a Vec<u8>,
     rom: &'a Vec<u8>,
     vram: Vec<u8>,
     wram: Vec<u8>,
     hwcfg: u8,
+
+    inputs: u8,
 }
 
 impl MMU<'_> {
@@ -21,11 +35,17 @@ impl MMU<'_> {
             hwcfg: rom[0x147],
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
+            inputs: 0xF,
         }
     }
 
     fn boot_rom_disabled(&self) -> bool {
         return self.get(0xFF50) == 1;
+    }
+
+    pub fn press(&mut self, btn: HWInput, pressed: bool) {
+        let addr = btn as u8;
+        self.inputs = set_bit(self.inputs, addr, !pressed);
     }
 }
 
@@ -53,6 +73,10 @@ impl Memory for MMU<'_> {
                 // mirror of 0xCD00-0xDDFF
                 self.wram[addr as usize - 0xA000 - 0x2000]
             }
+            0xFF00 => {
+                let read_mask = self.wram[addr as usize - 0xA000];
+                get_inputs(read_mask, self.inputs)
+            }
             0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
             _ => {
                 panic!("Memory access out of bounds! {}", b64(addr));
@@ -78,13 +102,11 @@ impl Memory for MMU<'_> {
                 // mirror of 0xCD00-0xDDFF
                 self.wram[addr as usize - 0xA000 - 0x2000] = val;
             }
+            0xFF00 => {
+                let read_mask = (val & 0x30) + 0x60;
+                self.wram[addr as usize - 0xA000] = read_mask;
+            }
             0xA000..=0xFFFF => {
-                let val = if addr == 0xFF00 {
-                    val & 0xF0 + 0x0F
-                } else {
-                    val
-                };
-
                 self.wram[(addr - 0xA000) as usize] = val
             },
             _ => {
@@ -92,5 +114,18 @@ impl Memory for MMU<'_> {
             }
         }
     }
+}
 
+fn get_inputs(mask: u8, inputs: u8) -> u8 {
+    let upper = (mask & 0x30) + 0x60;
+    let lower = if get_bit(upper, 4) == 0 {
+        // dpad
+        inputs & 0b1111
+    } else if get_bit(upper, 5) == 0 {
+        inputs >> 4
+    } else {
+        0xF
+    };
+
+    return upper + lower;
 }

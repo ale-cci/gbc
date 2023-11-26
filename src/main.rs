@@ -12,6 +12,7 @@ mod timer;
 use crate::ppu::{Display, PPU};
 use sdl2::pixels::Color;
 mod memory;
+use memory::HWInput;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -32,6 +33,20 @@ fn load_rom(filename: &str) -> Vec<u8> {
     let mut rom = vec![0; meta.len() as usize];
     f.read(&mut rom).expect("Overflow");
     return rom;
+}
+
+fn get_btn(sdl_key: &str) -> Option<HWInput> {
+    return match sdl_key {
+        "I" => Some(HWInput::ArrUp),
+        "K" => Some(HWInput::ArrDown),
+        "J" => Some(HWInput::ArrLeft),
+        "L" => Some(HWInput::ArrRight),
+        "A" => Some(HWInput::BtnA),
+        "B" => Some(HWInput::BtnB),
+        "Return" => Some(HWInput::BtnStart),
+        "Space" => Some(HWInput::BtnSelect),
+        _ => None,
+    };
 }
 
 fn main() {
@@ -75,6 +90,29 @@ fn main() {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => break 'running,
+
+                Event::KeyDown {
+                    keycode: Some(key),
+                    ..
+                } => {
+                    if let Some(btn) = get_btn(&key.name()) {
+                        rt.press_btn(btn);
+                        println!("Pressed {:?}", get_btn(&key.name()));
+                    } else {
+                        println!("P? {}", key.name());
+                    }
+                }
+
+                Event::KeyUp {
+                    keycode: Some(key),
+                    ..
+                } => {
+                    if let Some(btn) = get_btn(&key.name()) {
+                        rt.release_btn(btn);
+                        println!("Pressed {:?}", get_btn(&key.name()));
+                    }
+                }
+
                 _ => {}
             }
         }

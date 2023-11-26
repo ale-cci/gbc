@@ -1,4 +1,4 @@
-use crate::memory::{Memory, MMU};
+use crate::memory::{Memory, MMU, HWInput};
 use crate::byteop::*;
 use std::fmt;
 use crate::timer::Timer;
@@ -398,6 +398,12 @@ impl Runtime<'_> {
         return opcode;
     }
 
+    pub fn press_btn(&mut self, btn: HWInput) {
+        self.memory.press(btn, true);
+    }
+    pub fn release_btn(&mut self, btn: HWInput) {
+        self.memory.press(btn, false);
+    }
 
     pub fn tick(&mut self) -> u8 {
         let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
