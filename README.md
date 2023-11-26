@@ -5,12 +5,6 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 ```
 
 # What i have read so far:
-- About the PPU: https://hacktix.github.io/GBEDG/ppu/#an-introduction
-
-- Abount Memory Bank Switch:
-    - https://retrocomputing.stackexchange.com/questions/11732/how-does-the-gameboys-memory-bank-switching-work
-    - https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
-
 - GB Boot sequence:
     - https://realboyemulator.wordpress.com/2013/01/03/a-look-at-the-game-boy-bootstrap-let-the-fun-begin/
 
@@ -25,6 +19,14 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 - CPU Opcodes: https://meganesu.github.io/generate-gb-opcodes/
 
 - Wierd behavior of the half-carry flag? https://stackoverflow.com/questions/57958631/game-boy-half-carry-flag-and-16-bit-instructions-especially-opcode-0xe8
+
+- About the PPU: 
+    - https://hacktix.github.io/GBEDG/ppu/#an-introduction
+    - pandocs: https://gbdev.io/pandocs/Graphics.html
+
+- Abount Memory Bank Switch:
+    - https://retrocomputing.stackexchange.com/questions/11732/how-does-the-gameboys-memory-bank-switching-work
+    - https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
 
 
 # Blargg rom status:
@@ -49,7 +51,10 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 
 # NOTES:
 - A basic joypad implementation is required to display tetris screen.
-- Really useful to debug cpu opcodes: https://github.com/robert/gameboy-doctor
+- Debug CPU Opcodes:
+    - https://github.com/retrio/gb-test-roms
+    - https://github.com/robert/gameboy-doctor
+
 
 # TODO:
 - A lot
