@@ -23,3 +23,26 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 - CPU Half Carry: https://gist.github.com/meganesu/9e228b6b587decc783aa9be34ae27841
 
 - CPU Opcodes: https://meganesu.github.io/generate-gb-opcodes/
+
+- Wierd behavior of the half-carry flag? https://stackoverflow.com/questions/57958631/game-boy-half-carry-flag-and-16-bit-instructions-especially-opcode-0xe8
+
+
+# Blargg rom status:
+- [x] instr timing
+- [ ] cpu instrs (full requires implementation of MB1)
+    - [x] 01 - special
+    - [x] 02 - interrupts
+    - [x] 03 - op sp, hl
+    - [x] 04 - op r, imm
+    - [x] 05 - op rp
+    - [x] 06 - ld r,r
+    - [x] 07 - jr, jp, call, ret, rst
+    - [x] 08 - misc instrs
+    - [x] 09 - op r,r
+    - [x] 10 - bit ops
+    - [x] 11 - op a, (hl)
+- [ ] interrupt time
+- [ ] cgb sound
+- [ ] mem timing
+- [ ] mem timing-2
+- [ ] halt bug
