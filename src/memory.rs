@@ -48,6 +48,17 @@ impl MMU<'_> {
         let addr = btn as u8;
         self.inputs = set_bit(self.inputs, addr, !pressed);
     }
+
+    // TODO: transfer take 160 machine cycles: 640 dots
+    fn dma(&mut self, addr: u8) {
+        let source = (addr as u16) << 8;
+        let dest = 0xFE00;
+
+        for i in 0x00..0x9Fu16 {
+            let byte = self.get(source + i);
+            self.set(dest + i, byte);
+        }
+    }
 }
 
 impl Memory for MMU<'_> {
@@ -105,6 +116,9 @@ impl Memory for MMU<'_> {
             0xFF00 => {
                 let read_mask = (val & 0x30) + 0x60;
                 self.wram[addr as usize - 0xA000] = read_mask;
+            }
+            0xFF46 => {
+                self.dma(val);
             }
             0xA000..=0xFFFF => {
                 self.wram[(addr - 0xA000) as usize] = val
