@@ -49,3 +49,7 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 
 # NOTES:
 - A basic joypad implementation is required to display tetris screen.
+- Really useful to debug cpu opcodes: https://github.com/robert/gameboy-doctor
+
+# TODO:
+- A lot
