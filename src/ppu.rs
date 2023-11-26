@@ -18,14 +18,45 @@ pub struct PPU {
     wx: u8,
     wy: u8,
     bgp: u8,
+    sprites: Vec<Sprite>,
 
     window_line_counter: u8,
     remaining_cycles: u8,
     wait: u16,
 }
+struct Sprite {
+    addr: u16,
+    x: u8,
+    y: u8,
+    tile: u8,
+    flags: u8,
+}
+
+impl Sprite {
+    fn new(addr: u16) -> Sprite {
+        let mut s = Sprite {
+            addr: 0xFE00u16 + addr,
+            x: 0, y: 0,
+            tile: 0,
+            flags: 0,
+        };
+        return s;
+    }
+
+    fn update(&mut self, rt: &impl Memory) {
+        self.y = rt.get(self.addr + 0);
+        self.x = rt.get(self.addr + 1);
+        self.tile = rt.get(self.addr + 2);
+        self.flags = rt.get(self.addr + 3);
+    }
+}
 
 impl PPU {
     pub fn new() -> PPU {
+        let mut sprites = Vec::with_capacity(40);
+        for i in 0..40 {
+            sprites.push(Sprite::new(i as u16 * 4));
+        }
         PPU {
             x: 0,
             r_control: 0,
@@ -42,6 +73,7 @@ impl PPU {
             remaining_cycles: 0,
             wait: 0,
             bgp: 0,
+            sprites,
         }
     }
     fn get_color(&self, id: u8) -> Color {
@@ -82,6 +114,9 @@ impl PPU {
         }
 
         if self.wait == 0 {
+            for s in &mut self.sprites {
+                s.update(rt);
+            }
             self.render(rt, display);
         }
     }
@@ -103,14 +138,12 @@ impl PPU {
         let window_tilemap = get_bit(self.r_control, 6);
 
         if window_enable && window_visible && self.ly == self.wy {
-            println!("Window enable???");
             let tile_addr = self.x as u16 + self.ly as u16 * 32;
             let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
             let ttr = self.get_tile(tile_id, self.ly);
             self.render_tile(display, rt, ttr, self.wx + self.x, self.wy);
         }
-
 
         self.x += 1;
         if self.x == 20 {
@@ -136,6 +169,7 @@ impl PPU {
             }
             r_status = set_bit(r_status, 2, true);
         }
+
 
         // r_status 1-0: ppu mode
         rt.set(0xFF41, r_status);

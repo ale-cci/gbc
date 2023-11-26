@@ -7,14 +7,15 @@ pub trait Memory {
 
 #[derive(Debug)]
 pub enum HWInput {
-    ArrLeft   = 0b001,
-    ArrRight  = 0b000,
-    ArrDown   = 0b011,
-    ArrUp     = 0b010,
     BtnA      = 0b100,
     BtnB      = 0b101,
     BtnSelect = 0b110,
     BtnStart  = 0b111,
+
+    ArrRight  = 0b000,
+    ArrLeft   = 0b001,
+    ArrUp     = 0b010,
+    ArrDown   = 0b011,
 }
 
 pub struct MMU<'a> {
@@ -35,7 +36,7 @@ impl MMU<'_> {
             hwcfg: rom[0x147],
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
-            inputs: 0xF,
+            inputs: 0xFF,
         }
     }
 
@@ -59,7 +60,6 @@ impl Memory for MMU<'_> {
                     self.boot_rom[addr as usize]
                 }
             }
-            // 0xFF44 => { 0x90 }
             0x0100..=0x3FFF => self.rom[addr as usize],
             0x4000..=0x7FFF => self.rom[addr as usize],
             0x8000..=0x9FFF => {
