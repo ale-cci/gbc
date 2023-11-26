@@ -46,3 +46,6 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
 - [ ] mem timing
 - [ ] mem timing-2
 - [ ] halt bug
+
+# NOTES:
+- A basic joypad implementation is required to display tetris screen.
