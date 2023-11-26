@@ -20,7 +20,7 @@ pub struct PPU {
     bgp: u8,
     sprites: Vec<Sprite>,
 
-    window_line_counter: u8,
+    sprites_line_counter: u8,
     remaining_cycles: u8,
     wait: u16,
 }
@@ -49,6 +49,19 @@ impl Sprite {
         self.tile = rt.get(self.addr + 2);
         self.flags = rt.get(self.addr + 3);
     }
+
+    fn is_visible(&self, ly: u8, lcdc_2: u8) -> bool {
+        let height = if lcdc_2 == 0 { 8 } else { 16 };
+        return self.x != 0 && (ly + 16 >= self.y) && (ly + 16 < self.y + height);
+    }
+
+    fn tile_line(&self, mem: &impl Memory, y: u8) -> (u8, u8) {
+        (0, 0)
+    }
+    
+    fn palette(&self) -> u8 {
+        return get_bit(self.flags, 4);
+    }
 }
 
 impl PPU {
@@ -69,22 +82,19 @@ impl PPU {
             obp1: 0,
             wx: 0,
             wy: 0,
-            window_line_counter: 0,
+            sprites_line_counter: 0,
             remaining_cycles: 0,
             wait: 0,
             bgp: 0,
             sprites,
         }
     }
-    fn get_color(&self, id: u8) -> Color {
+
+    fn get_color(&self, id: u8, palette: u8) -> Color {
         let shift = id * 2;
         let color = (self.bgp & (0b11 << shift)) >> shift;
 
         let colors = vec![
-            // Color::RGB(155, 188, 15),
-            // Color::RGB(139, 172, 15),
-            // Color::RGB(48, 98, 48), // dark green
-            // Color::RGB(15, 56, 15), // darkest green
             Color::RGB(255, 255, 255),
             Color::RGB(169, 169, 169),
             Color::RGB(84, 84, 84),
@@ -145,11 +155,47 @@ impl PPU {
             self.render_tile(display, rt, ttr, self.wx + self.x, self.wy);
         }
 
+        let obj_size = get_bit(self.r_control, 2);
+
+        if self.sprites_line_counter < 10 {
+            for s in &self.sprites {
+                const DISPLAY_OFFSET : u8 = 8;
+                const SPRITE_WIDTH: u8 = 8;
+
+                if s.is_visible(self.ly, obj_size) {
+
+                    let sprite_left = s.x - DISPLAY_OFFSET;
+                    let sprite_right = sprite_left + SPRITE_WIDTH;
+
+                    let cx = self.x * 8;
+                    let drawable = sprite_left <= cx && cx <= sprite_right;
+                    if drawable {
+                        self.sprites_line_counter += 1;
+                        let obj_tile_line = s.tile_line(rt, self.ly + 16 - s.y);
+
+                        let (start, end) = if sprite_right > cx {
+                            (cx - sprite_left, sprite_right - cx)
+                        } else {
+                            (0, cx - sprite_left)
+                        };
+
+                        self.render_obj_partial(display, obj_tile_line, (start, end), self.ly, sprite_left, s.palette());
+                    }
+                }
+
+                if self.sprites_line_counter == 10 {
+                    println!("Limit reached!");
+                    break;
+                }
+            }
+        }
+
         self.x += 1;
         if self.x == 20 {
             self.x = 0; // hblank
             self.wait = 456;
             self.ly += 1;
+            self.sprites_line_counter = 0;
 
             let vblank = self.ly >= 144;
             let interrupt_flag = rt.get(0xFF0F);
@@ -200,8 +246,34 @@ impl PPU {
             let x = x * 8 + (7 - i);
             let y = y;
 
-            display.set_pixel(x, y, self.get_color(color));
+            display.set_pixel(x, y, self.get_color(color, self.bgp));
         }
+    }
+
+    fn render_obj_partial(&self, display: &mut Display, tile: (u8, u8), slice: (u8, u8), y: u8, x: u8, palette: u8) {
+        let (fst, snd) = tile;
+        let (t_start, t_end) = slice;
+
+        for i in t_start..t_end {
+            let l = get_bit(fst, i);
+            let h = get_bit(snd, i);
+
+            let color = (h << 1) + l;
+
+            if let Some(color) = self.obj_color(color, palette) {
+                display.set_pixel(
+                    x + (7 - i),
+                    y,
+                    color,
+                );
+            }
+        }
+    }
+
+    fn obj_color(&self, id: u8, palette_id: u8) -> Option<Color> {
+        let palette = if palette_id == 0 { self.obp0 } else { self.obp1 };
+        let c = self.get_color(id, palette);
+        return Some(c);
     }
 }
 
