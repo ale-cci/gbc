@@ -1,8 +1,8 @@
 use crate::byteop::*;
 use crate::memory::Memory;
 use sdl2::pixels::Color;
-use sdl2::render::Canvas;
 use sdl2::rect::Rect;
+use sdl2::render::Canvas;
 
 pub struct PPU {
     x: u8,
@@ -32,11 +32,22 @@ struct Sprite {
     flags: u8,
 }
 
+fn color_from_code(code: u8) -> Color {
+    return match code {
+        0 => Color::RGB(255, 255, 255),
+        1 => Color::RGB(169, 169, 169),
+        2 => Color::RGB(84, 84, 84),
+        3 => Color::RGB(0, 0, 0),
+        _ => panic!("error: undefined color: {code}"),
+    };
+}
+
 impl Sprite {
     fn new(addr: u16) -> Sprite {
         let mut s = Sprite {
             addr: 0xFE00u16 + addr,
-            x: 0, y: 0,
+            x: 0,
+            y: 0,
             tile: 0,
             flags: 0,
         };
@@ -58,7 +69,7 @@ impl Sprite {
     fn tile_line(&self, mem: &impl Memory, y: u8) -> (u8, u8) {
         (0, 0)
     }
-    
+
     fn palette(&self) -> u8 {
         return get_bit(self.flags, 4);
     }
@@ -90,17 +101,11 @@ impl PPU {
         }
     }
 
-    fn get_color(&self, id: u8, palette: u8) -> Color {
+    fn get_color(&self, id: u8, palette: u8) -> u8 {
         let shift = id * 2;
         let color = (self.bgp & (0b11 << shift)) >> shift;
 
-        let colors = vec![
-            Color::RGB(255, 255, 255),
-            Color::RGB(169, 169, 169),
-            Color::RGB(84, 84, 84),
-            Color::RGB(0, 0, 0),
-        ];
-        return colors[color as usize];
+        return color;
     }
 
     pub fn update(&mut self, rt: &mut impl Memory, cc: u8, display: &mut Display) {
@@ -159,11 +164,10 @@ impl PPU {
 
         if self.sprites_line_counter < 10 {
             for s in &self.sprites {
-                const DISPLAY_OFFSET : u8 = 8;
+                const DISPLAY_OFFSET: u8 = 8;
                 const SPRITE_WIDTH: u8 = 8;
 
                 if s.is_visible(self.ly, obj_size) {
-
                     let sprite_left = s.x - DISPLAY_OFFSET;
                     let sprite_right = sprite_left + SPRITE_WIDTH;
 
@@ -179,7 +183,14 @@ impl PPU {
                             (0, cx - sprite_left)
                         };
 
-                        self.render_obj_partial(display, obj_tile_line, (start, end), self.ly, sprite_left, s.palette());
+                        self.render_obj_partial(
+                            display,
+                            obj_tile_line,
+                            (start, end),
+                            self.ly,
+                            sprite_left,
+                            s.palette(),
+                        );
                     }
                 }
 
@@ -216,7 +227,6 @@ impl PPU {
             r_status = set_bit(r_status, 2, true);
         }
 
-
         // r_status 1-0: ppu mode
         rt.set(0xFF41, r_status);
         rt.set(0xFF44, self.ly);
@@ -250,7 +260,15 @@ impl PPU {
         }
     }
 
-    fn render_obj_partial(&self, display: &mut Display, tile: (u8, u8), slice: (u8, u8), y: u8, x: u8, palette: u8) {
+    fn render_obj_partial(
+        &self,
+        display: &mut Display,
+        tile: (u8, u8),
+        slice: (u8, u8),
+        y: u8,
+        x: u8,
+        palette: u8,
+    ) {
         let (fst, snd) = tile;
         let (t_start, t_end) = slice;
 
@@ -261,17 +279,17 @@ impl PPU {
             let color = (h << 1) + l;
 
             if let Some(color) = self.obj_color(color, palette) {
-                display.set_pixel(
-                    x + (7 - i),
-                    y,
-                    color,
-                );
+                display.set_pixel(x + (7 - i), y, color);
             }
         }
     }
 
-    fn obj_color(&self, id: u8, palette_id: u8) -> Option<Color> {
-        let palette = if palette_id == 0 { self.obp0 } else { self.obp1 };
+    fn obj_color(&self, id: u8, palette_id: u8) -> Option<u8> {
+        let palette = if palette_id == 0 {
+            self.obp0
+        } else {
+            self.obp1
+        };
         let c = self.get_color(id, palette);
         return Some(c);
     }
@@ -296,7 +314,7 @@ fn get_tile_addr(x: u8, scx: u8, ly: u8, scy: u8) -> u16 {
 }
 
 pub struct Display {
-    pixels: Vec<Color>,
+    pixels: Vec<u8>,
     width: u8,
     height: u8,
 }
@@ -307,18 +325,18 @@ impl Display {
 
         let size = width as usize * height as usize;
         Display {
-            pixels: vec![Color::RGB(0, 0, 0); size],
+            pixels: vec![0; size],
             width: width as u8,
             height: height as u8,
         }
     }
 
-    fn get_pixel(&self, x: u8, y: u8) -> Color {
+    fn get_pixel(&self, x: u8, y: u8) -> u8 {
         let addr = x as usize + y as usize * self.width as usize;
         return self.pixels[addr];
     }
 
-    fn set_pixel(&mut self, x: u8, y: u8, color: Color) {
+    fn set_pixel(&mut self, x: u8, y: u8, color: u8) {
         let addr = x as usize + y as usize * self.width as usize;
         let max_addr = self.width as usize * self.height as usize;
 
@@ -327,10 +345,13 @@ impl Display {
         }
     }
 
+    fn get_color(&mut self, x: u8, y: u8) -> Color {
+        return color_from_code(self.get_pixel(x, y));
+    }
     pub fn render(&mut self, canvas: &mut Canvas<sdl2::video::Window>) {
         for y in 0..self.height {
             for x in 0..self.width {
-                canvas.set_draw_color(self.get_pixel(x, y));
+                canvas.set_draw_color(self.get_color(x, y));
                 let rect = Rect::new(x as i32, y as i32, 1, 1);
                 canvas.fill_rect(rect).unwrap();
             }
@@ -343,19 +364,18 @@ fn tile_addr(tile_id: u8, signed_mode: bool) -> u16 {
     let b1 = 0x8800;
     let b2 = 0x9000;
 
-
     let select = get_bit(tile_id, 7) == 1;
 
     let mut tile = tile_id;
 
     if select {
         if signed_mode {
-            tile = !(tile -1);
-            tile = 0x80 - tile; 
+            tile = !(tile - 1);
+            tile = 0x80 - tile;
         } else {
             tile &= 0x7F
         }
-    } 
+    }
 
     let base = match (signed_mode, select) {
         (false, false) => b0,
@@ -396,5 +416,4 @@ mod tests {
         let got = tile_addr(0xFF, true);
         assert_eq!(b64(got), "8FF0");
     }
-
 }
