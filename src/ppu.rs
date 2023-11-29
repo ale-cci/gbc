@@ -68,10 +68,10 @@ impl Sprite {
 
     fn tile_line(&self, mem: &impl Memory, y: u8) -> (u8, u8) {
         let tile_id = tile_addr(self.tile, false);
-        let intratile = y & 0b111;
         let shift_y = y >> 3;
+        let intratile = y & 0b111;
 
-        let addr = (tile_id + shift_y as u16 * 32) * 16 + intratile as u16 * 2;
+        let addr = tile_id + intratile as u16 * 2;
 
         let fst = mem.get(addr);
         let snd = mem.get(addr + 1);
@@ -177,7 +177,11 @@ impl PPU {
                 const SPRITE_WIDTH: u8 = 8;
 
                 if s.is_visible(self.ly, obj_size) {
-                    let sprite_left = s.x - DISPLAY_OFFSET;
+                    let sprite_left = if s.x > DISPLAY_OFFSET {
+                        s.x - DISPLAY_OFFSET
+                    } else {
+                        0
+                    };
                     let sprite_right = sprite_left + SPRITE_WIDTH;
 
                     let cx = self.x * 8;
