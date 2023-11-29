@@ -50,5 +50,6 @@ export LIBRARY_PATH="$LIBRARY_PATH:/opt/homebrew/Cellar/sdl2/2.28.5/lib/"
     - https://github.com/robert/gameboy-doctor
 
 - Collection of roms for ppu test: https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/expected/CPU%20CGB%20C/m3_lcdc_bg_map_change2.png
+- To check out: https://github.com/aappleby/gbmicrotest
 # TODO:
 - A lot
