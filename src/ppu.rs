@@ -67,7 +67,16 @@ impl Sprite {
     }
 
     fn tile_line(&self, mem: &impl Memory, y: u8) -> (u8, u8) {
-        (0, 0)
+        let tile_id = tile_addr(self.tile, false);
+        let intratile = y & 0b111;
+        let shift_y = y >> 3;
+
+        let addr = (tile_id + shift_y as u16 * 32) * 16 + intratile as u16 * 2;
+
+        let fst = mem.get(addr);
+        let snd = mem.get(addr + 1);
+
+        return (fst, snd);
     }
 
     fn palette(&self) -> u8 {
