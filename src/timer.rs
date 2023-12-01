@@ -24,7 +24,7 @@ impl Timer {
 
         let div = mem.get(DIV_ADDR);
         let div = div.wrapping_add(timer_increment(internal_ticks, ticks, 3));
-        mem.set(DIV_ADDR, div as u8);
+        mem.hwset(DIV_ADDR, div as u8);
 
         let tima = mem.get(TIMA_ADDR);
         let tma = mem.get(TMA_ADDR);
@@ -86,6 +86,9 @@ mod tests {
             self.memory[addr as usize]
         }
         fn set(&mut self, addr: u16, val: u8) {
+            self.memory[addr as usize] = val;
+        }
+        fn hwset(&mut self, addr: u16, val: u8) {
             self.memory[addr as usize] = val;
         }
     }

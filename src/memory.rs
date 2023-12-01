@@ -3,6 +3,7 @@ use crate::byteop::*;
 pub trait Memory {
     fn get(&self, addr: u16) -> u8;
     fn set(&mut self, addr: u16, value: u8);
+    fn hwset(&mut self, addr: u16, value: u8);
 }
 
 #[derive(Debug)]
@@ -95,6 +96,14 @@ impl Memory for MMU<'_> {
         };
     }
 
+    fn hwset(&mut self, addr: u16, val: u8) -> () {
+        match addr {
+            0xFF04 => {
+                self.wram[addr as usize - 0xA000] = val
+            }
+            _ => panic!("Unhandled address {} for hwset", b64(addr)),
+        }
+    }
     fn set(&mut self, addr: u16, val: u8) -> () {
         match addr {
             0x0000..=0x3FFF => {

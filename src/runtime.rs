@@ -373,6 +373,9 @@ impl Memory for Runtime<'_> {
     fn set(&mut self, addr: u16, val: u8) -> () {
         self.memory.set(addr, val);
     }
+    fn hwset(&mut self, addr: u16, val: u8) -> () {
+        self.memory.set(addr, val);
+    }
 
 }
 

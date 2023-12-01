@@ -97,9 +97,6 @@ fn main() {
                 } => {
                     if let Some(btn) = get_btn(&key.name()) {
                         rt.press_btn(btn);
-                        println!("Pressed {:?}", get_btn(&key.name()));
-                    } else {
-                        println!("P? {}", key.name());
                     }
                 }
 
@@ -109,7 +106,6 @@ fn main() {
                 } => {
                     if let Some(btn) = get_btn(&key.name()) {
                         rt.release_btn(btn);
-                        println!("Pressed {:?}", get_btn(&key.name()));
                     }
                 }
 
