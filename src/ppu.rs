@@ -186,8 +186,11 @@ impl PPU {
 
                     let cx = self.x * 8;
                     let drawable = sprite_left <= cx && cx <= sprite_right;
+
                     if drawable {
-                        self.sprites_line_counter += 1;
+                        if sprite_right <= self.x {
+                            self.sprites_line_counter += 1;
+                        }
                         let obj_tile_line = s.tile_line(rt, self.ly + 16 - s.y);
 
                         let (start, end) = if sprite_right > cx {
@@ -208,7 +211,7 @@ impl PPU {
                 }
 
                 if self.sprites_line_counter == 10 {
-                    println!("Limit reached!");
+                    // n. of sprites
                     break;
                 }
             }
