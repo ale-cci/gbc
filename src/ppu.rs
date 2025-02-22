@@ -32,19 +32,20 @@ struct Sprite {
     flags: u8,
 }
 
-fn color_from_code(code: u8) -> Color {
-    return match code {
-        0 => Color::RGB(255, 255, 255),
-        1 => Color::RGB(169, 169, 169),
-        2 => Color::RGB(84, 84, 84),
-        3 => Color::RGB(0, 0, 0),
-        _ => panic!("error: undefined color: {code}"),
-    };
+const PALETTE: [Color; 4] = [
+    Color::RGB(255, 255, 255),
+    Color::RGB(169, 169, 169),
+    Color::RGB(84, 84, 84),
+    Color::RGB(0, 0, 0)
+];
+
+fn color_from_code(code: usize) -> Color {
+    return PALETTE[code];
 }
 
 impl Sprite {
     fn new(addr: u16) -> Sprite {
-        let mut s = Sprite {
+        let s = Sprite {
             addr: 0xFE00u16 + addr,
             x: 0,
             y: 0,
@@ -362,13 +363,15 @@ impl Display {
     }
 
     fn get_color(&mut self, x: u8, y: u8) -> Color {
-        return color_from_code(self.get_pixel(x, y));
+        return color_from_code(self.get_pixel(x, y) as usize);
     }
     pub fn render(&mut self, canvas: &mut Canvas<sdl2::video::Window>) {
+        let mut rect = Rect::new(0, 0, 1, 1);
         for y in 0..self.height {
             for x in 0..self.width {
                 canvas.set_draw_color(self.get_color(x, y));
-                let rect = Rect::new(x as i32, y as i32, 1, 1);
+                rect.x = x as i32;
+                rect.y = y as i32;
                 canvas.fill_rect(rect).unwrap();
             }
         }
