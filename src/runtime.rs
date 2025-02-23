@@ -1,5 +1,6 @@
 use crate::memory::{Memory, MMU, HWInput};
 use crate::byteop::*;
+use crate::registers::IF;
 use std::fmt;
 use crate::timer::Timer;
 
@@ -359,7 +360,7 @@ impl CpuRegisters {
 }
 
 pub struct Runtime<'a> {
-    memory: MMU<'a>,
+    pub memory: MMU<'a>,
     cpu: CpuRegisters,
 
     timer: Timer,
@@ -431,19 +432,19 @@ impl Runtime<'_> {
             }
             else if get_bit(interrupts, 1) == 1 {
                 self.cpu.pc = 0x48;
-                self.set(0xFF0F, set_bit(interrupt_flag, 1, false));
+                self.set(IF, set_bit(interrupt_flag, 1, false));
             }
             else if get_bit(interrupts, 2) == 1 {
                 self.cpu.pc = 0x50;
-                self.set(0xFF0F, set_bit(interrupt_flag, 2, false));
+                self.set(IF, set_bit(interrupt_flag, 2, false));
             }
             else if get_bit(interrupts, 3) == 1 {
                 self.cpu.pc = 0x58;
-                self.set(0xFF0F, set_bit(interrupt_flag, 3, false));
+                self.set(IF, set_bit(interrupt_flag, 3, false));
             }
             else if get_bit(interrupts, 4) == 1 {
                 self.cpu.pc = 0x60;
-                self.set(0xFF0F, set_bit(interrupt_flag, 4, false));
+                self.set(IF, set_bit(interrupt_flag, 4, false));
             }
         }
 

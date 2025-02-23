@@ -1,4 +1,6 @@
 extern crate sdl2;
+
+mod registers;
 use std::fs;
 use std::io::Read;
 mod runtime;
@@ -10,9 +12,11 @@ use std::time;
 mod ppu;
 mod timer;
 use crate::ppu::{Display, PPU};
+use crate::apu::{APU};
 use sdl2::pixels::Color;
 mod memory;
 use memory::HWInput;
+mod apu;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -59,8 +63,18 @@ fn main() {
 
     let sdl_context = sdl2::init().unwrap();
     let video = sdl_context.video().unwrap();
+    let audio = sdl_context.audio().unwrap();
     let width = 160;
     let height = 144;
+
+    let mut apu = APU::new();
+
+    let device = audio.open_playback(
+        None, 
+        &apu.spec.clone(),
+        |_sample| &mut apu).unwrap();
+
+    device.resume();
 
     let window = video
         .window("gbc", width, height)
@@ -117,6 +131,7 @@ fn main() {
             let cc = rt.tick();
             rt.tick_timer(cc * 4);
             ppu.update(&mut rt, cc, &mut display);
+            apu.update(cc, &mut rt);
         }
 
         tick = time::Instant::now();

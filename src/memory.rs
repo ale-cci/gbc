@@ -74,17 +74,17 @@ impl Memory for MMU<'_> {
             }
             0x0100..=0x3FFF => self.rom[addr as usize],
             0x4000..=0x7FFF => self.rom[addr as usize],
+
             0x8000..=0x9FFF => {
                 // rom + offset
                 self.vram[(addr - 0x8000) as usize]
             }
-            // 0xE000..=0xFDFF => {
-            //     self.wram[addr as usize - 0xA000 - 0x2000]
-            // }
+
             0xE000..=0xFDFF => {
                 // mirror of 0xCD00-0xDDFF
                 self.wram[addr as usize - 0xA000 - 0x2000]
             }
+
             0xFF00 => {
                 let read_mask = self.wram[addr as usize - 0xA000];
                 get_inputs(read_mask, self.inputs)
@@ -98,12 +98,16 @@ impl Memory for MMU<'_> {
 
     fn hwset(&mut self, addr: u16, val: u8) -> () {
         match addr {
+            0xFF26 => {
+                self.wram[addr as usize - 0xA000] = val
+            }
             0xFF04 => {
                 self.wram[addr as usize - 0xA000] = val
             }
             _ => panic!("Unhandled address {} for hwset", b64(addr)),
         }
     }
+
     fn set(&mut self, addr: u16, val: u8) -> () {
         match addr {
             0x0000..=0x3FFF => {
@@ -114,9 +118,6 @@ impl Memory for MMU<'_> {
             0x7FFF => {
                 // panic!("DANGER!");
             }
-            0xFF04 => {
-                self.wram[addr as usize - 0xA000] = 0;
-            }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
             0xE000..=0xFDFF => {
                 // mirror of 0xCD00-0xDDFF
@@ -125,6 +126,20 @@ impl Memory for MMU<'_> {
             0xFF00 => {
                 let read_mask = (val & 0x30) + 0x60;
                 self.wram[addr as usize - 0xA000] = read_mask;
+            }
+            0xFF26 => {
+                // only the first bit of this register can be set by games,
+                // this register can only be modified via hwset
+                let current_value = self.get(0xFF26) ;
+                let new_value: u8 = set_bit(
+                    current_value,
+                    7,
+                    get_bit(val, 7) == 1,
+                );
+                self.hwset(addr, new_value);
+            }
+            0xFF04 => {
+                self.hwset(addr, 0);
             }
             0xFF46 => {
                 self.dma(val);

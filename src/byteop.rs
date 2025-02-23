@@ -8,6 +8,7 @@ pub fn split_u16(hl: u16) -> (u8, u8) {
     return (h, l);
 }
 
+/// Get the nth bit of the register
 pub fn get_bit<T: Into<u16>>(reg: T, pos: u8) -> u8 {
     let reg = reg.into();
     let bit = (reg & (1 << pos as u16)) >> pos as u16;
