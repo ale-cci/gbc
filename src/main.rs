@@ -131,7 +131,7 @@ fn main() {
             let cc = rt.tick();
             rt.tick_timer(cc * 4);
             ppu.update(&mut rt, cc, &mut display);
-            apu.update(cc, &mut rt);
+            apu.update(cc * 4, &mut rt);
         }
 
         tick = time::Instant::now();

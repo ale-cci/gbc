@@ -145,19 +145,28 @@ struct Voice1 {
     trigger: bool,
 
     chan_volume: [f32; 2],
+    on: bool,
 }
+
 
 impl Voice1 {
     fn is_active(&self) -> bool {
-        self.trigger || self.length_enable && self.length < 64
+        self.on
     }
 
     fn tick(&mut self, ticks: u8, rt:  &mut impl Memory) {
-        let playing = self.trigger || self.length_enable && self.length < 64;
+        let dac_on = (rt.get(NR12) & 0xf8) != 0;
 
-        if playing {
-            if self.length_enable && self.length < 64 {
-                self.length += 1;
+        if self.on {
+            if !dac_on {
+                self.on = false;
+            }
+            if self.length_enable {
+                if self.length >= 64 {
+                    self.on = false;
+                } else {
+                    self.length += ticks;
+                }
             }
 
             if self.sweep != 0 {
@@ -194,12 +203,8 @@ impl Voice1 {
             self.sweep_timer = self.sweep;
 
             self.length_enable = get_bit(nr14, 6) == 1;
-            if !self.trigger {
-                self.trigger = get_bit(nr14, 7) == 1;
-                if self.trigger {
-                    rt.hwset(NR14, set_bit(nr14, 7, false))
-                }
-            }
+
+            self.trigger = get_bit(nr14, 7) == 1;
             self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8);
 
             let nr51 = rt.get(NR51);
@@ -207,6 +212,10 @@ impl Voice1 {
                 get_bit(nr51, 4) as f32,
                 get_bit(nr51, 0) as f32
             ];
+
+            if self.trigger {
+                self.on = true;
+            }
         }
     }
 }
@@ -225,16 +234,28 @@ struct Voice2 {
     trigger: bool,
 
     chan_volume: [f32; 2],
+
+    on: bool,
 }
 
 impl Voice2 {
-    fn is_active(&self) -> bool {
-        self.trigger || self.length_enable && self.length < 64
-    }
+    fn is_active(&self) -> bool { self.on }
 
     fn tick(&mut self, ticks: u8, rt: &mut impl Memory) {
-        if self.length_enable && self.length < 64 {
-            self.length += 1;
+        let dac_on = (rt.get(NR22) & 0xF8) != 0;
+
+        if self.on {
+            if !dac_on {
+                self.on = false;
+            }
+            if self.length_enable {
+                if self.length >= 64 {
+                    self.on = false;
+                } else {
+                    self.length += ticks;
+                }
+            }
+
         } else {
             let nr21 = rt.get(NR21);
             let nr22 = rt.get(NR22);
@@ -260,6 +281,10 @@ impl Voice2 {
                 get_bit(nr51, 5) as f32,
                 get_bit(nr51, 1) as f32,
             ];
+
+            if self.trigger {
+                self.on = true;
+            }
         }
 
     }
