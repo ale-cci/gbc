@@ -1,6 +1,6 @@
-use crate::byteop::*;
 #[allow(dead_code)]
-use crate::memory::Memory;
+use crate::byteop::*;
+use crate::{memory::Memory, runtime::Runtime};
 use crate::registers::*;
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 
@@ -11,6 +11,7 @@ pub struct APU {
     pub spec: AudioSpecDesired,
     phase: f32,
 
+    div_apu: u8,
     master_volume: f32,
     chan_volume: [f32; 2],
     voice1: Voice1,
@@ -42,6 +43,7 @@ impl APU {
             phase: 0.0,
             chan_volume: [0.0, 0.0],
 
+            div_apu: 0,
             master_volume: 0.0,
             voice1: Voice1::default(),
             voice2: Voice2::default(),
@@ -50,38 +52,10 @@ impl APU {
         }
     }
 
-    fn voice1(&self, phase: f32, channel: u8) -> f32 {
-        let volume = self.voice1.volume as f32 / 15.0;
-        let volume = volume * self.voice1.chan_volume[channel as usize] * self.master_volume;
-        if volume == 0.0 {
-            return 0.0;
-        }
-
-        let duty = wave_duty_lookup(self.voice1.wave_duty);
-        return if phase < duty { volume } else { -volume };
-    }
-
-    fn voice2(&self, phase: f32, channel: u8) -> f32 {
-        let volume = self.voice2.volume as f32 / 15.0;
-        let volume = volume * self.voice2.chan_volume[channel as usize] * self.master_volume;
-        if volume == 0.0 {
-            return 0.0;
-        }
-
-        let duty = wave_duty_lookup(self.voice2.wave_duty);
-        return if phase < duty { volume } else { -volume };
-    }
-
-    fn voice3(&self, phase: f32, chan: u8) -> f32 {
-        0.0
-    }
-    fn voice4(&self, phase: f32, chan: u8) -> f32 {
-        0.0
-    }
-
-    pub fn update(&mut self, ticks: u8, rt: &mut impl Memory) {
+    pub fn update(&mut self, ticks: u8, rt: &mut Runtime) {
         let nr52 = rt.get(NR52);
         let audio_on = get_bit(nr52, 7);
+
         if audio_on == 1 {
             self.master_volume = 1.0;
         } else {
@@ -96,33 +70,8 @@ impl APU {
 
         self.voice1.tick(ticks, rt);
         self.voice2.tick(ticks, rt);
-
-
-        // update voice 3
-        let nr34 = rt.get(NR34);
-
-        self.voice3.dac = get_bit(rt.get(NR30), 7) == 1;
-        self.voice3.length = rt.get(NR31);
-        self.voice3.volume = match (rt.get(NR32) & 0b1100000) >> 5 {
-            0 => 0.0,
-            1 => 1.0,
-            2 => 0.5,
-            3 => 0.25,
-            v => panic!("Value {v} not allowed"),
-        };
-        self.voice3.period = rt.get(NR33) as u16 + ((nr34 as u16 & 0b111) << 8);
-        self.voice3.length_enable = get_bit(nr34, 6) == 1;
-
-        if !self.voice3.trigger {
-            self.voice3.trigger = get_bit(nr34, 7) == 1;
-            if self.voice3.trigger {
-                rt.hwset(NR34, set_bit(nr34, 7, false));
-            }
-        }
-
-        for (i, addr) in (0xFF30..=0xFF3F).enumerate() {
-            self.voice3.pattern[i] = rt.get(addr);
-        }
+        self.voice3.tick(ticks, rt);
+        self.voice4.tick(ticks, rt);
     }
 }
 
@@ -146,21 +95,24 @@ struct Voice1 {
 
     chan_volume: [f32; 2],
     on: bool,
+    dac_on: bool,
 }
 
+trait BitChannel {
+    fn is_active(&self) -> bool;
+    fn overlap(&mut self, out: &mut [f32], channels: usize);
+    fn tick(&mut self, ticks: u8, rt: &mut impl Memory);
+}
 
-impl Voice1 {
+impl BitChannel for Voice1 {
     fn is_active(&self) -> bool {
-        self.on
+        self.on && self.dac_on
     }
 
     fn tick(&mut self, ticks: u8, rt:  &mut impl Memory) {
-        let dac_on = (rt.get(NR12) & 0xf8) != 0;
+        self.dac_on = (rt.get(NR12) & 0xf8) != 0;
 
         if self.on {
-            if !dac_on {
-                self.on = false;
-            }
             if self.length_enable {
                 if self.length >= 64 {
                     self.on = false;
@@ -218,6 +170,28 @@ impl Voice1 {
             }
         }
     }
+
+    fn overlap(&mut self, out: &mut [f32], channels: usize) {
+        if !self.is_active() {
+            return
+        }
+
+        let phase_increment = pi_from_period(self.period);
+        let duty = wave_duty_lookup(self.wave_duty);
+        let volume = self.volume as f32 / 15.0;
+
+        for (i, x) in out.iter_mut().enumerate() {
+            *x = if self.phase < duty {
+                volume
+            } else {
+                -volume
+            };
+
+            if i % channels == (channels - 1) {
+                self.phase += phase_increment;
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -238,8 +212,9 @@ struct Voice2 {
     on: bool,
 }
 
-impl Voice2 {
+impl BitChannel for Voice2 {
     fn is_active(&self) -> bool { self.on }
+    fn overlap(&mut self, out: &mut [f32], channels: usize) { }
 
     fn tick(&mut self, ticks: u8, rt: &mut impl Memory) {
         let dac_on = (rt.get(NR22) & 0xF8) != 0;
@@ -302,11 +277,61 @@ struct Voice3 {
     period: u16,
     pattern: [u8; 16],
 }
+impl BitChannel for Voice3 {
+    fn is_active(&self) -> bool {
+        return false;
+    }
+    fn overlap(&mut self, out: &mut [f32], channels: usize) {
+        if !self.is_active() {
+            return;
+        }
+    }
+    fn tick(&mut self, ticks: u8, rt: &mut impl Memory) {
+        let nr34 = rt.get(NR34);
+        self.dac = get_bit(rt.get(NR30), 7) == 1;
+        self.length = rt.get(NR31);
+        self.volume = match (rt.get(NR32) & 0b1100000) >> 5 {
+            0 => 0.0,
+            1 => 1.0,
+            2 => 0.5,
+            3 => 0.25,
+            v => panic!("Value {v} not allowed"),
+        };
+        self.period = rt.get(NR33) as u16 + ((nr34 as u16 & 0b111) << 8);
+        self.length_enable = get_bit(nr34, 6) == 1;
+
+        if !self.trigger {
+            self.trigger = get_bit(nr34, 7) == 1;
+            if self.trigger {
+                rt.hwset(NR34, set_bit(nr34, 7, false));
+            }
+        }
+
+        for (i, addr) in (0xFF30..=0xFF3F).enumerate() {
+            self.pattern[i] = rt.get(addr);
+        }
+
+    }
+}
 
 #[derive(Default)]
 struct Voice4 {
     phase: f32,
     trigger: bool,
+}
+
+impl BitChannel for Voice4 {
+    fn is_active(&self) -> bool {
+        return false;
+    }
+
+    fn overlap(&mut self, out: &mut [f32], channels: usize) {
+        if !self.is_active() {
+            return ;
+        }
+    }
+
+    fn tick(&mut self, ticks: u8, rt: &mut impl Memory) { }
 }
 
 fn pi_from_period(period: u16) -> f32 {
@@ -315,47 +340,24 @@ fn pi_from_period(period: u16) -> f32 {
     return 1.0 / v;
 }
 
+
 impl AudioCallback for &mut APU {
     type Channel = f32;
 
     fn callback(&mut self, out: &mut [f32]) {
-        let phase1_inc = pi_from_period(self.voice1.period);
-        let phase2_inc = pi_from_period(self.voice2.period);
-        let phase3_inc = pi_from_period(self.voice3.period);
-
-        // let hz = phase_inc * 44100.0;
-        // println!("Hz: {hz}Hz");
-
         let channels = 2;
-        let mut chan = 0;
+
         for x in out.iter_mut() {
-            chan = (chan + 1) % channels;
-            let mut output = 0.0;
-
-            if self.voice1.is_active() {
-                output += self.voice1(self.voice1.phase, chan);
-            }
-
-            if self.voice2.is_active() {
-                output += self.voice2(self.voice2.phase, chan);
-            }
-            if self.voice3.trigger {
-                output += self.voice3(self.voice3.phase, chan);
-            }
-            output += self.voice4(self.phase, chan);
-
-            *x = output * self.chan_volume[chan as usize];
-
-            if chan == 1 {
-                self.voice1.phase = (self.voice1.phase + phase1_inc) % 1.0;
-                self.voice2.phase = (self.voice2.phase + phase2_inc) % 1.0;
-                self.voice3.phase = (self.voice3.phase + phase3_inc) % 1.0;
-            }
+            *x = 0.0;
         }
 
-        self.voice1.trigger = false;
-        self.voice2.trigger = false;
-        self.voice3.trigger = false;
-        self.voice4.trigger = false;
+        self.voice1.overlap(out, channels);
+        self.voice2.overlap(out, channels);
+        self.voice3.overlap(out, channels);
+        self.voice4.overlap(out, channels);
+
+        for (i, x) in out.iter_mut().enumerate() {
+            *x = *x * self.chan_volume[i % 2 as usize] * self.master_volume;
+        }
     }
 }

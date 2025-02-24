@@ -3,6 +3,8 @@ use crate::memory::Memory;
 
 pub struct Timer {
     internal_ticks: u16,
+
+    pub div_apu_ticks: u8,
 }
 
 const INT_ADDR : u16 = 0xFF0F;
@@ -15,6 +17,7 @@ impl Timer {
     pub fn new() -> Timer {
         Timer {
             internal_ticks: 0,
+            div_apu_ticks: 0,
         }
     }
 
@@ -23,7 +26,16 @@ impl Timer {
         self.internal_ticks = self.internal_ticks.wrapping_add(ticks as u16);
 
         let div = mem.get(DIV_ADDR);
-        let div = div.wrapping_add(timer_increment(internal_ticks, ticks, 3));
+        let timer_incr = timer_increment(internal_ticks, ticks, 3);
+
+        // every time bit 4 (5 for CGB) goes from 1 to 0
+        // 1111 every 
+        self.div_apu_ticks = timer_incr / 16; 
+        if div % 16 + timer_incr % 16 > 16 {
+            self.div_apu_ticks += 1;
+        }
+
+        let div = div.wrapping_add(timer_incr);
         mem.hwset(DIV_ADDR, div as u8);
 
         let tima = mem.get(TIMA_ADDR);

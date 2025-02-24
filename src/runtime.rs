@@ -363,7 +363,7 @@ pub struct Runtime<'a> {
     pub memory: MMU<'a>,
     cpu: CpuRegisters,
 
-    timer: Timer,
+    pub timer: Timer,
 }
 
 impl Memory for Runtime<'_> {
