@@ -36,7 +36,7 @@ const PALETTE: [Color; 4] = [
     Color::RGB(255, 255, 255),
     Color::RGB(169, 169, 169),
     Color::RGB(84, 84, 84),
-    Color::RGB(0, 0, 0)
+    Color::RGB(0, 0, 0),
 ];
 
 fn color_from_code(code: usize) -> Color {
