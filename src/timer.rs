@@ -4,20 +4,20 @@ use crate::memory::Memory;
 pub struct Timer {
     internal_ticks: u16,
 
-    pub div_apu_ticks: u8,
+    pub delta_div: u8,
 }
 
-const INT_ADDR : u16 = 0xFF0F;
-const TIMA_ADDR : u16 = 0xFF05;
-const TMA_ADDR  : u16 = 0xFF06;
-const DIV_ADDR  : u16 = 0xFF04;
-const TAC_ADDR  : u16 = 0xFF07;
+const INT_ADDR: u16 = 0xFF0F;
+const TIMA_ADDR: u16 = 0xFF05;
+const TMA_ADDR: u16 = 0xFF06;
+const DIV_ADDR: u16 = 0xFF04;
+const TAC_ADDR: u16 = 0xFF07;
 
 impl Timer {
     pub fn new() -> Timer {
         Timer {
             internal_ticks: 0,
-            div_apu_ticks: 0,
+            delta_div: 0,
         }
     }
 
@@ -26,15 +26,10 @@ impl Timer {
         self.internal_ticks = self.internal_ticks.wrapping_add(ticks as u16);
 
         let div = mem.get(DIV_ADDR);
+
         let timer_incr = timer_increment(internal_ticks, ticks, 3);
 
-        // every time bit 4 (5 for CGB) goes from 1 to 0
-        // 1111 every 
-        self.div_apu_ticks = timer_incr / 16; 
-        if div % 16 + timer_incr % 16 > 16 {
-            self.div_apu_ticks += 1;
-        }
-
+        self.delta_div = timer_incr;
         let div = div.wrapping_add(timer_incr);
         mem.hwset(DIV_ADDR, div as u8);
 
@@ -44,14 +39,13 @@ impl Timer {
 
         let timer_speed = tac & 0b11;
 
-
         if get_bit(tac, 2) == 0x1 {
             let incr = timer_increment(internal_ticks, ticks, timer_speed);
             let interrupt = (tima as u16 + incr as u16) > 0xFF;
 
             let tima = if interrupt {
                 let int_flag = mem.get(INT_ADDR) | 0b100;
-                mem.set(INT_ADDR, int_flag) ;
+                mem.set(INT_ADDR, int_flag);
 
                 tma + ((incr - (0xFF - tima + 1)) & (0xFF - tma))
             } else {
@@ -68,11 +62,11 @@ fn timer_increment(curr_cycles: u16, elapsed: u8, speed: u8) -> u8 {
         0 => 8 + 2, // 4x slower
         1 => 8 - 4, // 16x faster
         2 => 8 - 2, // 2x faster
-        3 => 8, // 1x (same as div)
+        3 => 8,     // 1x (same as div)
         _ => panic!("Unhandled speed"),
     };
 
-    let mask = (1 << shifts) -1;
+    let mask = (1 << shifts) - 1;
     let mut curr_cycles = curr_cycles & mask;
     curr_cycles += elapsed as u16;
 
@@ -105,7 +99,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_div_increment() {
         let mut timer = Timer::new();
@@ -117,7 +110,6 @@ mod tests {
         timer.tick(&mut mem, 1);
         assert_eq!(mem.get(DIV_ADDR), 1);
     }
-
 
     #[test]
     fn test_invokes_interrupt() {
@@ -134,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_does_not_increment_tima_if_tac_enable_is_0() {
-        let mut timer  = Timer::new();
+        let mut timer = Timer::new();
         let mut mem = Mem::new();
         mem.set(TAC_ADDR, 0b011);
         timer.tick(&mut mem, 255);
@@ -146,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_does_increment_tima_if_tac_enable_is_1() {
-        let mut timer  = Timer::new();
+        let mut timer = Timer::new();
         let mut mem = Mem::new();
         mem.set(TAC_ADDR, 0b111);
         timer.tick(&mut mem, 255);
