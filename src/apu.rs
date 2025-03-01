@@ -68,6 +68,21 @@ impl APU {
         self.voice2.tick(ticks, rt);
         self.voice3.tick(ticks, rt);
         self.voice4.tick(ticks, rt);
+
+        let mut mask = 0;
+        if self.voice1.is_active() {
+            mask |= 0b0001;
+        }
+        if self.voice2.is_active() {
+            mask |= 0b0010;
+        }
+        if self.voice3.is_active() {
+            mask |= 0b0100;
+        }
+        if self.voice4.is_active() {
+            mask |= 0b1000;
+        }
+        rt.set(NR52, rt.get(NR52) | mask);
     }
 }
 
@@ -118,7 +133,7 @@ impl BitChannel for Voice1 {
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
         self.dac_on = (rt.get(NR12) & 0xf8) != 0;
 
-        if self.on {
+        if self.on & self.dac_on {
             if self.length_enable {
                 // DIV_APU increments by one every 16 ticks (every time bit 4 of div goes from 1 to
                 // 0)
@@ -127,8 +142,8 @@ impl BitChannel for Voice1 {
 
                 while self.sweep_len_timer <= 0 {
                     self.sweep_len_timer += 2;
-                    if self.length > 0 {
-                        self.length -= 1;
+                    if self.length < 64 {
+                        self.length += 1;
                     } else {
                         self.on = false;
                     }
@@ -145,6 +160,15 @@ impl BitChannel for Voice1 {
                     } else {
                         self.period = self.period - delta;
                     }
+                    if self.period > 0x7FF {
+                        self.on = false;
+                    }
+
+                    // write back nr14 & nr13
+                    rt.hwset(NR13, (self.period & 0xF) as u8);
+
+                    let mask = (self.period >> 8) as u8 & 0b111;
+                    rt.hwset(NR14, rt.get(NR14) | mask);
                 }
             }
 
@@ -156,59 +180,53 @@ impl BitChannel for Voice1 {
                     if self.envelope > 0 && self.volume < 0xF {
                         self.volume += 1;
                     } else if self.envelope == 0 && self.volume > 0 {
+                        // pandocs: "the envelope reaching a volume of 0 does NOT turn the channel
+                        // off."
                         self.volume -= 1;
-                        if self.volume == 0 {
-                            self.on = false;
-                        }
                     }
+
                 }
             }
-
-            // length is written back?
-            // write back the period
-            rt.hwset(NR13, (self.period & 0xFF) as u8);
-            let mask = ((self.period >> 8) & 0b111) as u8;
-            let nr14 = rt.get(NR14) | mask;
-            rt.hwset(NR14, nr14);
         }
 
+        let nr10 = rt.get(NR10);
+        let nr11 = rt.get(NR11);
+        let nr12 = rt.get(NR12);
+        let nr13 = rt.get(NR13);
         let nr14 = rt.get(NR14);
+        let nr51 = rt.get(NR51);
+
         let trigger = get_bit(nr14, 7) == 1;
+
+        self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8); // frequency
+        self.wave_duty = (nr11 & 0b11000000) >> 6;
+        self.step = nr10 & 0b111;
+        self.sweep = nr12 & 0b111; // envelope period
+        self.direction = get_bit(nr10, 3);
+        self.pace = (nr10 & 0b1110000) >> 4;
+        self.chan_volume = [get_bit(nr51, 4) as f32, get_bit(nr51, 0) as f32];
+        self.volume = (nr12 & 0b11110000) >> 4;
 
         if trigger && !self.on {
             self.period_sweeps = 0;
-            let nr10 = rt.get(NR10);
-            let nr11 = rt.get(NR11);
-            let nr12 = rt.get(NR12);
-            let nr13 = rt.get(NR13);
-
             // update voice 1
-            self.pace = (nr10 & 0b1110000) >> 4;
-            self.sweep_freq_timer = self.pace as i16 * 4;
+            self.sweep_freq_timer = self.pace as i16 * 4; // 128hz
 
-            self.direction = get_bit(nr10, 3);
-            self.step = nr10 & 0b111;
-            self.wave_duty = (nr11 & 0b11000000) >> 6;
             self.phase = 0.0;
 
             self.length = nr11 & 0b111111;
-            self.volume = (nr12 & 0b11110000) >> 4;
             self.envelope = get_bit(nr12, 3);
-            self.sweep = nr12 & 0b111; // envelope period
-            self.sweep_vol_timer = 8 * self.sweep as i16;
+            self.sweep_vol_timer = 8 * self.sweep as i16; // 64hz
 
             self.length_enable = get_bit(nr14, 6) == 1;
-            self.sweep_len_timer = 2;
+            self.sweep_len_timer = 2; // 256hz
 
-            self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8); // frequency
-
-            let nr51 = rt.get(NR51);
-
-            self.chan_volume = [get_bit(nr51, 4) as f32, get_bit(nr51, 0) as f32];
-
-            self.on = true;
+            self.on = trigger;
             rt.hwset(NR14, set_bit(nr14, 7, false));
         }
+
+
+
     }
 
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
@@ -253,40 +271,78 @@ struct Voice2 {
     chan_volume: [f32; 2],
 
     on: bool,
+    dac_on: bool,
+
+    sweep_len_timer: i16,
 }
 
 impl BitChannel for Voice2 {
     fn is_active(&self) -> bool {
-        self.on
+        self.on && self.dac_on
     }
-    fn overlap(&mut self, out: &mut [f32], channels: usize) {}
+    fn overlap(&mut self, out: &mut [f32], channels: usize) {
+        if !self.is_active() {
+            return;
+        }
+        let phase_increment = pi_from_period(self.period);
+        let freq = 1.0 / phase_increment;
+
+        let duty = wave_duty_lookup(self.wave_duty);
+        let volume = self.volume as f32 / 15.0;
+
+        let phase_increment = freq / 44100.0;
+
+
+        for (i, x) in out.iter_mut().enumerate() {
+            *x = if self.phase < duty { volume } else { -volume };
+
+            if i % channels == (channels - 1) {
+                self.phase = (self.phase + phase_increment) % 1.0;
+            }
+        }
+
+    }
 
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
-        let dac_on = (rt.get(NR22) & 0xF8) != 0;
+        self.dac_on = (rt.get(NR22) & 0xF8) != 0;
 
         if self.on {
-            if !dac_on {
-                self.on = false;
-            }
             if self.length_enable {
-                if self.length >= 64 {
-                    self.on = false;
-                } else {
-                    self.length += ticks;
+                // DIV_APU increments by one every 16 ticks (every time bit 4 of div goes from 1 to
+                // 0)
+                // sound length occurs every 2 DIV-APU ticks, so it triggers every 16 * 2 ticks
+                self.sweep_len_timer -= rt.timer.delta_div as i16;
+
+                while self.sweep_len_timer <= 0 {
+                    self.sweep_len_timer += 2;
+                    if self.length < 64 {
+                        self.length += 1;
+                    } else {
+                        self.on = false;
+                    }
                 }
             }
-        } else {
-            let nr21 = rt.get(NR21);
-            let nr22 = rt.get(NR22);
-            let nr23 = rt.get(NR23);
-            let nr24 = rt.get(NR24);
+        }
 
-            self.wave_duty = (nr21 & 0b11000000) >> 6;
-            self.length = nr21 & 0b111111;
-            self.volume = (nr22 & 0b11110000) >> 4;
-            self.envelope = get_bit(nr22, 3);
-            self.sweep = nr22 & 0b111;
+        let nr21 = rt.get(NR21);
+        let nr22 = rt.get(NR22);
+        let nr23 = rt.get(NR23);
+        let nr24 = rt.get(NR24);
+        let nr51 = rt.get(NR51);
 
+        let trigger = get_bit(nr24, 7) == 1;
+
+        self.chan_volume = [get_bit(nr51, 5) as f32, get_bit(nr51, 1) as f32];
+        self.wave_duty = (nr21 & 0b11000000) >> 6;
+        self.length = nr21 & 0b111111;
+        self.volume = (nr22 & 0b11110000) >> 4;
+        self.envelope = get_bit(nr22, 3);
+        self.sweep = nr22 & 0b111;
+        self.period = nr23 as u16 + ((nr24 as u16 & 0b111) << 8);
+
+        if trigger && !self.on {
+
+            self.sweep_len_timer = 2;
             self.length_enable = get_bit(nr24, 6) == 1;
             if !self.trigger {
                 self.trigger = get_bit(nr24, 7) == 1;
@@ -294,14 +350,12 @@ impl BitChannel for Voice2 {
                     rt.hwset(NR24, set_bit(nr24, 7, false))
                 }
             }
-            self.period = nr23 as u16 + ((nr24 as u16 & 0b111) << 8);
-            let nr51 = rt.get(NR51);
-            self.chan_volume = [get_bit(nr51, 5) as f32, get_bit(nr51, 1) as f32];
 
-            if self.trigger {
-                self.on = true;
-            }
+            self.on = true;
+            rt.hwset(NR24, set_bit(nr24, 7, false));
         }
+
+
     }
 }
 
@@ -324,6 +378,7 @@ impl BitChannel for Voice3 {
         if !self.is_active() {
             return;
         }
+        println!("voice3 on");
     }
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
         let nr34 = rt.get(NR34);

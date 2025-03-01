@@ -29,8 +29,11 @@ impl Timer {
 
         let timer_incr = timer_increment(internal_ticks, ticks, 3);
 
-        self.delta_div = timer_incr;
+        // apu tick every time bit 4 goes from 1 to 0
+        self.delta_div = ((div & 0b11111) + timer_incr) >> 5;
+
         let div = div.wrapping_add(timer_incr);
+
         mem.hwset(DIV_ADDR, div as u8);
 
         let tima = mem.get(TIMA_ADDR);
