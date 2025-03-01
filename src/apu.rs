@@ -429,7 +429,6 @@ impl BitChannel for Voice4 {
 
 fn pi_from_period(period: u16) -> f32 {
     let v = (1048576u32 / (2048 - period as u32) / 8) as f32;
-
     return 1.0 / v;
 }
 

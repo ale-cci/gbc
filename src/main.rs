@@ -90,7 +90,7 @@ fn main() {
 
     let mut ppu = PPU::new();
 
-    let refresh_target = time::Duration::from_micros(10000000 / 60);
+    let refresh_target = time::Duration::from_micros(1_000_000 / 60);
     let clock_target = time::Duration::from_nanos(1_000_000_000 / 4194304);
 
     let mut ft = time::Instant::now();
@@ -127,14 +127,16 @@ fn main() {
             }
         }
 
-        if tick.elapsed() > clock_target {
+        let ticks = (tick.elapsed().as_nanos() / clock_target.as_nanos()) / 4;
+        for _ in 0..ticks {
             let cc = rt.tick();
             rt.tick_timer(cc * 4);
             ppu.update(&mut rt, cc, &mut display);
             apu.update(cc * 4, &mut rt);
         }
-
-        tick = time::Instant::now();
+        if ticks > 0 {
+            tick = time::Instant::now();
+        }
 
         // Refresh 60fps
         if ft.elapsed() > refresh_target {
