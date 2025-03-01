@@ -99,8 +99,14 @@ struct Voice1 {
 }
 
 trait BitChannel {
+    // says if the channel is active or not, i.e. if it produces any sound.
+    // calling "overlap" on non active channels does nothing.
     fn is_active(&self) -> bool;
+
+    // adds the output wave of this channel to "out".
     fn overlap(&mut self, out: &mut [f32], channels: usize);
+
+    // updates the channel, reading what it should output from memory.
     fn tick(&mut self, ticks: u8, rt: &mut Runtime);
 }
 
@@ -157,6 +163,13 @@ impl BitChannel for Voice1 {
                     }
                 }
             }
+
+            // length is written back?
+            // write back the period
+            rt.hwset(NR13, (self.period & 0xFF) as u8);
+            let mask = ((self.period >> 8) & 0b111) as u8;
+            let nr14 = rt.get(NR14) | mask;
+            rt.hwset(NR14, nr14);
         }
 
         let nr14 = rt.get(NR14);
@@ -181,13 +194,13 @@ impl BitChannel for Voice1 {
             self.length = nr11 & 0b111111;
             self.volume = (nr12 & 0b11110000) >> 4;
             self.envelope = get_bit(nr12, 3);
-            self.sweep = nr12 & 0b111;
+            self.sweep = nr12 & 0b111; // envelope period
             self.sweep_vol_timer = 8 * self.sweep as i16;
 
             self.length_enable = get_bit(nr14, 6) == 1;
             self.sweep_len_timer = 2;
 
-            self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8);
+            self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8); // frequency
 
             let nr51 = rt.get(NR51);
 
@@ -204,14 +217,21 @@ impl BitChannel for Voice1 {
         }
 
         let phase_increment = pi_from_period(self.period);
+        let freq = 1.0 / phase_increment;
+
+        // println!("ch1: freq({}) vol({}) env({}) duty({})", self.period, self.volume, self.sweep, self.wave_duty);
+        // println!("hz: {}", freq);
         let duty = wave_duty_lookup(self.wave_duty);
         let volume = self.volume as f32 / 15.0;
+
+        let phase_increment = freq / 44100.0;
+
 
         for (i, x) in out.iter_mut().enumerate() {
             *x = if self.phase < duty { volume } else { -volume };
 
             if i % channels == (channels - 1) {
-                self.phase += phase_increment;
+                self.phase = (self.phase + phase_increment) % 1.0;
             }
         }
     }
@@ -353,7 +373,7 @@ impl BitChannel for Voice4 {
 }
 
 fn pi_from_period(period: u16) -> f32 {
-    let v = (1048576u32 / (2048 - period as u32) / 32) as f32;
+    let v = (1048576u32 / (2048 - period as u32) / 8) as f32;
 
     return 1.0 / v;
 }
@@ -362,7 +382,7 @@ impl AudioCallback for &mut APU {
     type Channel = f32;
 
     fn callback(&mut self, out: &mut [f32]) {
-        let channels = 2;
+        let channels = self.spec.channels.unwrap().into();
 
         for x in out.iter_mut() {
             *x = 0.0;

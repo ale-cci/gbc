@@ -14,6 +14,7 @@ pub const NR11 :u16 = 0xFF11;
 pub const NR12 :u16 = 0xFF12;
 pub const NR13 :u16 = 0xFF13;
 pub const NR14 :u16 = 0xFF14;
+
 pub const NR21 :u16 = 0xFF16;
 pub const NR22 :u16 = 0xFF17;
 pub const NR23 :u16 = 0xFF18;
