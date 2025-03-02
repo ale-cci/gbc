@@ -36,7 +36,7 @@ impl APU {
             spec: AudioSpecDesired {
                 freq: Some(44100), // samples per seconds
                 channels: Some(CHANNELS),
-                samples: Some(8), // a power of 2, the audio buffer size in samples
+                samples: Some(256), // a power of 2, the audio buffer size in samples
             },
             chan_volume: [0.0, 0.0],
 
@@ -238,11 +238,10 @@ impl BitChannel for Voice1 {
 
         let phase_increment = pi_from_period(self.period);
         let freq = 1.0 / phase_increment;
+        let phase_increment = freq / 44100.0;
 
         let duty = wave_duty_lookup(self.wave_duty);
         let volume = self.volume as f32 / 15.0;
-
-        let phase_increment = freq / 44100.0;
 
         for (i, x) in out.iter_mut().enumerate() {
             *x += if self.phase < duty { volume } else { -volume };
@@ -385,7 +384,7 @@ struct Voice3 {
 
 impl Voice3 {
     fn get_sample(&self, idx: usize) -> f32 {
-        assert!(idx < 16);
+        assert!(idx < 32);
 
         let value = self.pattern[idx / 2];
         let nibble = if idx % 2 == 0 {
@@ -395,39 +394,44 @@ impl Voice3 {
         };
 
         let nibble_f32 = nibble as f32 / (0b1111 as f32);
-        let nibble_f32 = (nibble_f32 - 0.5) * 2.0; // check if this is correct, translates the wave
-                                                   // into -1/+1 range instead of 0/+1
+
+        // not sure if this matters.
+        let nibble_f32 = (nibble_f32 - 0.5) * 2.0;
+
+        assert!(nibble_f32 >= -1.0);
+        assert!(nibble_f32 <= 1.0);
         return nibble_f32;
     }
 }
 
 impl BitChannel for Voice3 {
     fn is_active(&self) -> bool {
-        return self.dac;
+        return self.on && self.dac;
     }
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
         if !self.is_active() {
             return;
         }
-        // according to https://gbdev.io/pandocs/Audio_Registers.html#ff1d--nr33-channel-3-period-low-write-only
-        let tone_freq_hz = 65536.0 / (2048.0 - self.period as f32);
-        // println!("hz: {tone_freq_hz}");
 
-        let sample_rate = 2094152.0 / (2048.0 - self.period as f32);
+        let tone_freq_hz = 65536.0 / (2048.0 - self.period as f32) * 32.0;
 
-        // its 32 times the ch. freq
+        let step = tone_freq_hz / 44100.0;
 
         for (i, x) in out.iter_mut().enumerate() {
-            let note = self.get_sample(self.idx.into());
+            let note = self.get_sample(self.idx as usize);
 
-            // *x = (note as f32 / 15.0) * self.volume;
+            *x += note * self.volume;
 
-            if i % channels == channels - 1 {
-                self.idx = (self.idx + 1) % 16;
+            if i % channels == (channels - 1) {
+                self.phase += step;
+                if self.phase >= 1.0 {
+                    self.phase %= 1.0;
+                    self.idx = (self.idx + 1) % 32;
+                }
             }
         }
-        // println!("voice3 on");
     }
+
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
         let nr30 = rt.get(NR30);
         let nr31 = rt.get(NR31);
@@ -454,14 +458,14 @@ impl BitChannel for Voice3 {
         }
 
         self.dac = get_bit(nr30, 7) == 1;
-        self.length = nr31 as u16;
-        self.period = nr33 as u16 + ((nr34 as u16 & 0b111) << 8);
+
         self.length_enable = get_bit(nr34, 6) == 1;
 
         let trigger = get_bit(nr34, 7) == 1;
 
         if trigger {
             self.idx = 0;
+            self.period = nr33 as u16 + ((nr34 as u16 & 0b111) << 8);
             // period div
             self.volume = match (nr32 & 0b1100000) >> 5 {
                 0 => 0.0,
@@ -474,6 +478,9 @@ impl BitChannel for Voice3 {
             self.on = true;
             // reset the trigger
             rt.hwset(NR34, set_bit(nr34, 7, false));
+            if self.length == 256 {
+                self.length = nr31 as u16;
+            }
         }
 
         for (i, addr) in (0xFF30..=0xFF3F).enumerate() {
