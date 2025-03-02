@@ -3,7 +3,9 @@ extern crate sdl2;
 mod registers;
 use std::fs;
 use std::io::Read;
+use std::rc::Rc;
 mod runtime;
+use mbc::{Rom, RomMBC3, RomNoMBC};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 mod byteop;
@@ -11,12 +13,13 @@ use clap::Parser;
 use std::time;
 mod ppu;
 mod timer;
+use crate::apu::APU;
 use crate::ppu::{Display, PPU};
-use crate::apu::{APU};
 use sdl2::pixels::Color;
 mod memory;
 use memory::HWInput;
 mod apu;
+mod mbc;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -53,13 +56,22 @@ fn get_btn(sdl_key: &str) -> Option<HWInput> {
     };
 }
 
+
 fn main() {
     let args = Args::parse();
 
     let game_rom = load_rom(&args.rom);
     let bootstrap = load_rom("DMG_ROM.bin");
 
-    let mut rt = runtime::Runtime::load(&bootstrap, &game_rom);
+    let mbc_type = game_rom[0x0147];
+
+    let mut rom = match mbc_type {
+         0x13 => RomMBC3::new(&game_rom),
+        // 0..=3 => &RomNoMBC { rom: &game_rom },
+        code => panic!("Unsupported mbc type {:#x}", code),
+    };
+
+    let mut rt = runtime::Runtime::load(&bootstrap, &mut rom);
 
     let sdl_context = sdl2::init().unwrap();
     let video = sdl_context.video().unwrap();
@@ -69,10 +81,9 @@ fn main() {
 
     let mut apu = APU::new();
 
-    let device = audio.open_playback(
-        None, 
-        &apu.spec.clone(),
-        |_sample| &mut apu).unwrap();
+    let device = audio
+        .open_playback(None, &apu.spec.clone(), |_sample| &mut apu)
+        .unwrap();
 
     device.resume();
 
@@ -107,8 +118,7 @@ fn main() {
                 } => break 'running,
 
                 Event::KeyDown {
-                    keycode: Some(key),
-                    ..
+                    keycode: Some(key), ..
                 } => {
                     if let Some(btn) = get_btn(&key.name()) {
                         rt.press_btn(btn);
@@ -116,8 +126,7 @@ fn main() {
                 }
 
                 Event::KeyUp {
-                    keycode: Some(key),
-                    ..
+                    keycode: Some(key), ..
                 } => {
                     if let Some(btn) = get_btn(&key.name()) {
                         rt.release_btn(btn);
@@ -148,4 +157,5 @@ fn main() {
             canvas.present();
         }
     }
+    drop(rt);
 }

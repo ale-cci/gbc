@@ -103,7 +103,7 @@ struct Voice1 {
     period: u16,
     period_sweeps: u8,
     length_enable: bool,
-    trigger: bool,
+    // trigger: bool,
 
     chan_volume: [f32; 2],
     on: bool,
@@ -131,7 +131,7 @@ impl BitChannel for Voice1 {
         self.on && self.dac_on
     }
 
-    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+    fn tick(&mut self, _ticks: u8, rt: &mut Runtime) {
         self.dac_on = (rt.get(NR12) & 0xf8) != 0;
 
         if self.on & self.dac_on {
@@ -301,7 +301,7 @@ impl BitChannel for Voice2 {
         }
     }
 
-    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+    fn tick(&mut self, _ticks: u8, rt: &mut Runtime) {
         self.dac_on = (rt.get(NR22) & 0xF8) != 0;
 
         if self.on {
@@ -432,7 +432,7 @@ impl BitChannel for Voice3 {
         }
     }
 
-    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+    fn tick(&mut self, _ticks: u8, rt: &mut Runtime) {
         let nr30 = rt.get(NR30);
         let nr31 = rt.get(NR31);
         let nr32 = rt.get(NR32);
@@ -580,7 +580,7 @@ impl BitChannel for Voice4 {
         }
     }
 
-    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+    fn tick(&mut self, _ticks: u8, rt: &mut Runtime) {
         let nr41 = rt.get(NR41);
         let nr42 = rt.get(NR42);
         let nr43 = rt.get(NR43);

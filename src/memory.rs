@@ -1,4 +1,4 @@
-use crate::byteop::*;
+use crate::{byteop::*, mbc::Rom};
 
 pub trait Memory {
     fn get(&self, addr: u16) -> u8;
@@ -19,9 +19,11 @@ pub enum HWInput {
     ArrDown   = 0b011,
 }
 
+
 pub struct MMU<'a> {
     boot_rom: &'a Vec<u8>,
-    rom: &'a Vec<u8>,
+    rom: &'a mut dyn Rom<'a>,
+
     vram: Vec<u8>,
     wram: Vec<u8>,
     hwcfg: u8,
@@ -30,11 +32,13 @@ pub struct MMU<'a> {
 }
 
 impl MMU<'_> {
-    pub fn new<'a>(boot_rom: &'a Vec<u8>, rom: &'a Vec<u8>) -> MMU<'a> {
+    pub fn new<'a>(boot_rom: &'a Vec<u8>, rom: &'a mut dyn Rom<'a>) -> MMU<'a> {
+        let hwcfg = rom.get(0x147);
+
         MMU {
             boot_rom,
             rom,
-            hwcfg: rom[0x147],
+            hwcfg,
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
             inputs: 0xFF,
@@ -67,13 +71,13 @@ impl Memory for MMU<'_> {
         return match addr {
             0x0000..=0x00FF => {
                 if self.boot_rom_disabled() {
-                    self.rom[addr as usize]
+                    self.rom.get(addr)
                 } else {
                     self.boot_rom[addr as usize]
                 }
             }
-            0x0100..=0x3FFF => self.rom[addr as usize],
-            0x4000..=0x7FFF => self.rom[addr as usize],
+            0x0100..=0x3FFF => self.rom.get(addr),
+            0x4000..=0x7FFF => self.rom.get(addr),
 
             0x8000..=0x9FFF => {
                 // rom + offset
@@ -110,13 +114,8 @@ impl Memory for MMU<'_> {
 
     fn set(&mut self, addr: u16, val: u8) -> () {
         match addr {
-            0x0000..=0x3FFF => {
-                println!("Write on RO memory ({}): {}", b64(addr), b64(val));
-            }
-           //      self.wram[addr as usize - 0xA000 - 0x2000] = val;
-            // }
-            0x7FFF => {
-                // panic!("DANGER!");
+            0x0000..=0x7FFF => {
+                self.rom.set(addr, val);
             }
             0x8000..=0x9FFF => self.vram[(addr - 0x8000) as usize] = val,
             0xE000..=0xFDFF => {

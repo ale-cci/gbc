@@ -1,8 +1,9 @@
-use crate::memory::{Memory, MMU, HWInput};
 use crate::byteop::*;
+use crate::mbc::Rom;
+use crate::memory::{HWInput, Memory, MMU};
 use crate::registers::IF;
-use std::fmt;
 use crate::timer::Timer;
+use std::fmt;
 
 struct CpuRegisters {
     ra: u8,
@@ -30,18 +31,20 @@ enum CFlag {
 
 impl fmt::Debug for CpuRegisters {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "A:{ra} F:{rf} B:{rb} C:{rc} D:{rd} E:{re} H:{rh} L:{rl} SP:{sp} PC:{pc}",
-               ra=b64(self.ra),
-               rf=b64(self.rf),
-               rb=b64(self.rb),
-               rc=b64(self.rc),
-               rd=b64(self.rd),
-               re=b64(self.re),
-               rh=b64(self.rh),
-               rl=b64(self.rl),
-               sp=b64(self.sp),
-               pc=b64(self.pc),
-               )
+        write!(
+            f,
+            "A:{ra} F:{rf} B:{rb} C:{rc} D:{rd} E:{re} H:{rh} L:{rl} SP:{sp} PC:{pc}",
+            ra = b64(self.ra),
+            rf = b64(self.rf),
+            rb = b64(self.rb),
+            rc = b64(self.rc),
+            rd = b64(self.rd),
+            re = b64(self.re),
+            rh = b64(self.rh),
+            rl = b64(self.rl),
+            sp = b64(self.sp),
+            pc = b64(self.pc),
+        )
     }
 }
 
@@ -70,7 +73,6 @@ impl CpuRegisters {
         return get_bit(self.rf, flag as u8);
     }
 
-
     fn bc(&self) -> u16 {
         return join_u8(self.rb, self.rc);
     }
@@ -98,7 +100,7 @@ impl CpuRegisters {
                 self.ra = self.ra.wrapping_add(0x60);
                 cy = 1;
             }
-            if h_flag || ((self.ra & 0xF )> 0x9){
+            if h_flag || ((self.ra & 0xF) > 0x9) {
                 self.ra = self.ra.wrapping_add(0x6);
             }
         } else {
@@ -110,7 +112,7 @@ impl CpuRegisters {
             }
         }
 
-        self.set_flag(CFlag::Z, (self.ra == 0)as u8);
+        self.set_flag(CFlag::Z, (self.ra == 0) as u8);
         self.set_flag(CFlag::H, 0);
         self.set_flag(CFlag::CY, cy);
     }
@@ -201,10 +203,10 @@ impl CpuRegisters {
         self.set_flag(CFlag::S, 0);
         self.set_flag(CFlag::H, hc as u8);
         self.set_flag(CFlag::CY, cy as u8);
-        return res
+        return res;
     }
 
-    fn srl(&mut self, val: u8) -> u8{
+    fn srl(&mut self, val: u8) -> u8 {
         let lsb = val & 0x1;
         let val = val >> 1;
 
@@ -258,7 +260,10 @@ impl CpuRegisters {
 
         self.set_flag(CFlag::Z, (res == 0) as u8);
         self.set_flag(CFlag::S, 1);
-        self.set_flag(CFlag::CY, ((self.ra as u16) < (val as u16 + cy as u16)) as u8);
+        self.set_flag(
+            CFlag::CY,
+            ((self.ra as u16) < (val as u16 + cy as u16)) as u8,
+        );
 
         let hc = (self.ra & 0xF) < ((val & 0xF) + cy);
         self.set_flag(CFlag::H, hc as u8);
@@ -377,15 +382,14 @@ impl Memory for Runtime<'_> {
     fn hwset(&mut self, addr: u16, val: u8) -> () {
         self.memory.set(addr, val);
     }
-
 }
 
 impl Runtime<'_> {
-    pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a Vec<u8>) -> Runtime<'a> {
+    // pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a Box<dyn Rom<'a>>) -> Runtime<'a> {
+    pub fn load<'a>(bootstrap: &'a Vec<u8>, rom: &'a mut dyn Rom<'a>) -> Runtime<'a> {
         let rt = Runtime {
             cpu: CpuRegisters::new(),
-
-            memory: MMU::new(&bootstrap, &rom),
+            memory: MMU::new(&bootstrap, rom),
             timer: Timer::new(),
         };
 
@@ -429,20 +433,16 @@ impl Runtime<'_> {
             if get_bit(interrupts, 0) == 1 {
                 self.cpu.pc = 0x40;
                 self.set(0xFF0F, set_bit(interrupt_flag, 0, false));
-            }
-            else if get_bit(interrupts, 1) == 1 {
+            } else if get_bit(interrupts, 1) == 1 {
                 self.cpu.pc = 0x48;
                 self.set(IF, set_bit(interrupt_flag, 1, false));
-            }
-            else if get_bit(interrupts, 2) == 1 {
+            } else if get_bit(interrupts, 2) == 1 {
                 self.cpu.pc = 0x50;
                 self.set(IF, set_bit(interrupt_flag, 2, false));
-            }
-            else if get_bit(interrupts, 3) == 1 {
+            } else if get_bit(interrupts, 3) == 1 {
                 self.cpu.pc = 0x58;
                 self.set(IF, set_bit(interrupt_flag, 3, false));
-            }
-            else if get_bit(interrupts, 4) == 1 {
+            } else if get_bit(interrupts, 4) == 1 {
                 self.cpu.pc = 0x60;
                 self.set(IF, set_bit(interrupt_flag, 4, false));
             }
@@ -1057,23 +1057,71 @@ impl Runtime<'_> {
             0x8E => self.cpu.adc_ra(self.get(self.cpu.hl())) * 2,
             0x8F => self.cpu.adc_ra(self.cpu.ra),
 
-            0x90 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.rb); 1 }
-            0x91 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.rc); 1 }
-            0x92 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.rd); 1 }
-            0x93 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.re); 1 }
-            0x94 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.rh); 1 }
-            0x95 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.rl); 1 }
-            0x96 => { self.cpu.ra = self.cpu.sub_ra(self.get(self.cpu.hl())); 2 }
-            0x97 => { self.cpu.ra = self.cpu.sub_ra(self.cpu.ra); 1 }
+            0x90 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.rb);
+                1
+            }
+            0x91 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.rc);
+                1
+            }
+            0x92 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.rd);
+                1
+            }
+            0x93 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.re);
+                1
+            }
+            0x94 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.rh);
+                1
+            }
+            0x95 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.rl);
+                1
+            }
+            0x96 => {
+                self.cpu.ra = self.cpu.sub_ra(self.get(self.cpu.hl()));
+                2
+            }
+            0x97 => {
+                self.cpu.ra = self.cpu.sub_ra(self.cpu.ra);
+                1
+            }
 
-            0x98 => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.rb); 1 }
-            0x99 => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.rc); 1 }
-            0x9A => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.rd); 1 }
-            0x9B => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.re); 1 }
-            0x9C => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.rh); 1 }
-            0x9D => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.rl); 1 }
-            0x9E => { self.cpu.ra = self.cpu.sbc_ra(self.get(self.cpu.hl())); 2 }
-            0x9F => { self.cpu.ra = self.cpu.sbc_ra(self.cpu.ra); 1 }
+            0x98 => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.rb);
+                1
+            }
+            0x99 => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.rc);
+                1
+            }
+            0x9A => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.rd);
+                1
+            }
+            0x9B => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.re);
+                1
+            }
+            0x9C => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.rh);
+                1
+            }
+            0x9D => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.rl);
+                1
+            }
+            0x9E => {
+                self.cpu.ra = self.cpu.sbc_ra(self.get(self.cpu.hl()));
+                2
+            }
+            0x9F => {
+                self.cpu.ra = self.cpu.sbc_ra(self.cpu.ra);
+                1
+            }
 
             0xA0 => self.cpu.and_ra(self.cpu.rb),
             0xA1 => self.cpu.and_ra(self.cpu.rc),
@@ -1206,7 +1254,6 @@ impl Runtime<'_> {
                 } else {
                     3
                 }
-
             }
             0xCD => {
                 // CALL a16
@@ -1457,54 +1504,135 @@ impl Runtime<'_> {
 
     fn eval_cb(&mut self, opcode: u8) -> u8 {
         return match opcode {
-            0x00 => { self.cpu.rb = self.cpu.rlc(self.cpu.rb); 2 }
-            0x01 => { self.cpu.rc = self.cpu.rlc(self.cpu.rc); 2 }
-            0x02 => { self.cpu.rd = self.cpu.rlc(self.cpu.rd); 2 }
-            0x03 => { self.cpu.re = self.cpu.rlc(self.cpu.re); 2 }
-            0x04 => { self.cpu.rh = self.cpu.rlc(self.cpu.rh); 2 }
-            0x05 => { self.cpu.rl = self.cpu.rlc(self.cpu.rl); 2 }
+            0x00 => {
+                self.cpu.rb = self.cpu.rlc(self.cpu.rb);
+                2
+            }
+            0x01 => {
+                self.cpu.rc = self.cpu.rlc(self.cpu.rc);
+                2
+            }
+            0x02 => {
+                self.cpu.rd = self.cpu.rlc(self.cpu.rd);
+                2
+            }
+            0x03 => {
+                self.cpu.re = self.cpu.rlc(self.cpu.re);
+                2
+            }
+            0x04 => {
+                self.cpu.rh = self.cpu.rlc(self.cpu.rh);
+                2
+            }
+            0x05 => {
+                self.cpu.rl = self.cpu.rlc(self.cpu.rl);
+                2
+            }
             0x06 => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.rlc(hl);
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x07 => { self.cpu.ra = self.cpu.rlc(self.cpu.ra); 2 }
+            0x07 => {
+                self.cpu.ra = self.cpu.rlc(self.cpu.ra);
+                2
+            }
 
-            0x08 => { self.cpu.rb = self.cpu.rrc(self.cpu.rb); 2 }
-            0x09 => { self.cpu.rc = self.cpu.rrc(self.cpu.rc); 2 }
-            0x0A => { self.cpu.rd = self.cpu.rrc(self.cpu.rd); 2 }
-            0x0B => { self.cpu.re = self.cpu.rrc(self.cpu.re); 2 }
-            0x0C => { self.cpu.rh = self.cpu.rrc(self.cpu.rh); 2 }
-            0x0D => { self.cpu.rl = self.cpu.rrc(self.cpu.rl); 2 }
+            0x08 => {
+                self.cpu.rb = self.cpu.rrc(self.cpu.rb);
+                2
+            }
+            0x09 => {
+                self.cpu.rc = self.cpu.rrc(self.cpu.rc);
+                2
+            }
+            0x0A => {
+                self.cpu.rd = self.cpu.rrc(self.cpu.rd);
+                2
+            }
+            0x0B => {
+                self.cpu.re = self.cpu.rrc(self.cpu.re);
+                2
+            }
+            0x0C => {
+                self.cpu.rh = self.cpu.rrc(self.cpu.rh);
+                2
+            }
+            0x0D => {
+                self.cpu.rl = self.cpu.rrc(self.cpu.rl);
+                2
+            }
             0x0E => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.rrc(hl);
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x0F => { self.cpu.ra = self.cpu.rrc(self.cpu.ra); 2 }
+            0x0F => {
+                self.cpu.ra = self.cpu.rrc(self.cpu.ra);
+                2
+            }
 
-            0x10 => { self.cpu.rb = self.cpu.rl(self.cpu.rb); 2 }
-            0x11 => { self.cpu.rc = self.cpu.rl(self.cpu.rc); 2 }
-            0x12 => { self.cpu.rd = self.cpu.rl(self.cpu.rd); 2 }
-            0x13 => { self.cpu.re = self.cpu.rl(self.cpu.re); 2 }
-            0x14 => { self.cpu.rh = self.cpu.rl(self.cpu.rh); 2 }
-            0x15 => { self.cpu.rl = self.cpu.rl(self.cpu.rl); 2 }
+            0x10 => {
+                self.cpu.rb = self.cpu.rl(self.cpu.rb);
+                2
+            }
+            0x11 => {
+                self.cpu.rc = self.cpu.rl(self.cpu.rc);
+                2
+            }
+            0x12 => {
+                self.cpu.rd = self.cpu.rl(self.cpu.rd);
+                2
+            }
+            0x13 => {
+                self.cpu.re = self.cpu.rl(self.cpu.re);
+                2
+            }
+            0x14 => {
+                self.cpu.rh = self.cpu.rl(self.cpu.rh);
+                2
+            }
+            0x15 => {
+                self.cpu.rl = self.cpu.rl(self.cpu.rl);
+                2
+            }
             0x16 => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.rl(hl);
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x17 => { self.cpu.ra = self.cpu.rl(self.cpu.ra); 2 }
+            0x17 => {
+                self.cpu.ra = self.cpu.rl(self.cpu.ra);
+                2
+            }
 
-            0x18 => { self.cpu.rb = self.cpu.rr(self.cpu.rb); 2 }
-            0x19 => { self.cpu.rc = self.cpu.rr(self.cpu.rc); 2 }
-            0x1A => { self.cpu.rd = self.cpu.rr(self.cpu.rd); 2 }
-            0x1B => { self.cpu.re = self.cpu.rr(self.cpu.re); 2 }
-            0x1C => { self.cpu.rh = self.cpu.rr(self.cpu.rh); 2 }
-            0x1D => { self.cpu.rl = self.cpu.rr(self.cpu.rl); 2 }
+            0x18 => {
+                self.cpu.rb = self.cpu.rr(self.cpu.rb);
+                2
+            }
+            0x19 => {
+                self.cpu.rc = self.cpu.rr(self.cpu.rc);
+                2
+            }
+            0x1A => {
+                self.cpu.rd = self.cpu.rr(self.cpu.rd);
+                2
+            }
+            0x1B => {
+                self.cpu.re = self.cpu.rr(self.cpu.re);
+                2
+            }
+            0x1C => {
+                self.cpu.rh = self.cpu.rr(self.cpu.rh);
+                2
+            }
+            0x1D => {
+                self.cpu.rl = self.cpu.rr(self.cpu.rl);
+                2
+            }
             0x1E => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.rr(hl);
@@ -1516,26 +1644,65 @@ impl Runtime<'_> {
                 2
             }
 
-            0x20 => { self.cpu.rb = self.cpu.sla(self.cpu.rb); 2 }
-            0x21 => { self.cpu.rc = self.cpu.sla(self.cpu.rc); 2 }
-            0x22 => { self.cpu.rd = self.cpu.sla(self.cpu.rd); 2 }
-            0x23 => { self.cpu.re = self.cpu.sla(self.cpu.re); 2 }
-            0x24 => { self.cpu.rh = self.cpu.sla(self.cpu.rh); 2 }
-            0x25 => { self.cpu.rl = self.cpu.sla(self.cpu.rl); 2 }
+            0x20 => {
+                self.cpu.rb = self.cpu.sla(self.cpu.rb);
+                2
+            }
+            0x21 => {
+                self.cpu.rc = self.cpu.sla(self.cpu.rc);
+                2
+            }
+            0x22 => {
+                self.cpu.rd = self.cpu.sla(self.cpu.rd);
+                2
+            }
+            0x23 => {
+                self.cpu.re = self.cpu.sla(self.cpu.re);
+                2
+            }
+            0x24 => {
+                self.cpu.rh = self.cpu.sla(self.cpu.rh);
+                2
+            }
+            0x25 => {
+                self.cpu.rl = self.cpu.sla(self.cpu.rl);
+                2
+            }
             0x26 => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.sla(hl);
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x27 => { self.cpu.ra = self.cpu.sla(self.cpu.ra); 2 }
+            0x27 => {
+                self.cpu.ra = self.cpu.sla(self.cpu.ra);
+                2
+            }
 
-            0x28 => { self.cpu.rb = self.cpu.sra(self.cpu.rb); 2 }
-            0x29 => { self.cpu.rc = self.cpu.sra(self.cpu.rc); 2 }
-            0x2A => { self.cpu.rd = self.cpu.sra(self.cpu.rd); 2 }
-            0x2B => { self.cpu.re = self.cpu.sra(self.cpu.re); 2 }
-            0x2C => { self.cpu.rh = self.cpu.sra(self.cpu.rh); 2 }
-            0x2D => { self.cpu.rl = self.cpu.sra(self.cpu.rl); 2 }
+            0x28 => {
+                self.cpu.rb = self.cpu.sra(self.cpu.rb);
+                2
+            }
+            0x29 => {
+                self.cpu.rc = self.cpu.sra(self.cpu.rc);
+                2
+            }
+            0x2A => {
+                self.cpu.rd = self.cpu.sra(self.cpu.rd);
+                2
+            }
+            0x2B => {
+                self.cpu.re = self.cpu.sra(self.cpu.re);
+                2
+            }
+            0x2C => {
+                self.cpu.rh = self.cpu.sra(self.cpu.rh);
+                2
+            }
+            0x2D => {
+                self.cpu.rl = self.cpu.sra(self.cpu.rl);
+                2
+            }
             0x2E => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.sra(hl);
@@ -1546,7 +1713,6 @@ impl Runtime<'_> {
                 self.cpu.ra = self.cpu.sra(self.cpu.ra);
                 2
             }
-
 
             0x30 => {
                 self.cpu.rb = self.cpu.swap(self.cpu.rb);
@@ -1582,124 +1748,312 @@ impl Runtime<'_> {
                 2
             }
 
-            0x38 => { self.cpu.rb = self.cpu.srl(self.cpu.rb); 2 }
-            0x39 => { self.cpu.rc = self.cpu.srl(self.cpu.rc); 2 }
-            0x3A => { self.cpu.rd = self.cpu.srl(self.cpu.rd); 2 }
-            0x3B => { self.cpu.re = self.cpu.srl(self.cpu.re); 2 }
-            0x3C => { self.cpu.rh = self.cpu.srl(self.cpu.rh); 2 }
-            0x3D => { self.cpu.rl = self.cpu.srl(self.cpu.rl); 2 }
+            0x38 => {
+                self.cpu.rb = self.cpu.srl(self.cpu.rb);
+                2
+            }
+            0x39 => {
+                self.cpu.rc = self.cpu.srl(self.cpu.rc);
+                2
+            }
+            0x3A => {
+                self.cpu.rd = self.cpu.srl(self.cpu.rd);
+                2
+            }
+            0x3B => {
+                self.cpu.re = self.cpu.srl(self.cpu.re);
+                2
+            }
+            0x3C => {
+                self.cpu.rh = self.cpu.srl(self.cpu.rh);
+                2
+            }
+            0x3D => {
+                self.cpu.rl = self.cpu.srl(self.cpu.rl);
+                2
+            }
             0x3E => {
                 let hl = self.get(self.cpu.hl());
                 let hl = self.cpu.srl(hl);
                 self.set(self.cpu.hl(), hl);
                 4
             }
-            0x3F => { self.cpu.ra = self.cpu.srl(self.cpu.ra); 2 }
+            0x3F => {
+                self.cpu.ra = self.cpu.srl(self.cpu.ra);
+                2
+            }
 
-            0x40 => { self.cpu.bit(self.cpu.rb, 0); 2 }
-            0x41 => { self.cpu.bit(self.cpu.rc, 0); 2 }
-            0x42 => { self.cpu.bit(self.cpu.rd, 0); 2 }
-            0x43 => { self.cpu.bit(self.cpu.re, 0); 2 }
-            0x44 => { self.cpu.bit(self.cpu.rh, 0); 2 }
-            0x45 => { self.cpu.bit(self.cpu.rl, 0); 2 }
-            0x46 => { 
+            0x40 => {
+                self.cpu.bit(self.cpu.rb, 0);
+                2
+            }
+            0x41 => {
+                self.cpu.bit(self.cpu.rc, 0);
+                2
+            }
+            0x42 => {
+                self.cpu.bit(self.cpu.rd, 0);
+                2
+            }
+            0x43 => {
+                self.cpu.bit(self.cpu.re, 0);
+                2
+            }
+            0x44 => {
+                self.cpu.bit(self.cpu.rh, 0);
+                2
+            }
+            0x45 => {
+                self.cpu.bit(self.cpu.rl, 0);
+                2
+            }
+            0x46 => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 0);
                 3
             }
-            0x47 => { self.cpu.bit(self.cpu.ra, 0); 2 }
+            0x47 => {
+                self.cpu.bit(self.cpu.ra, 0);
+                2
+            }
 
-            0x48 => { self.cpu.bit(self.cpu.rb, 1); 2 }
-            0x49 => { self.cpu.bit(self.cpu.rc, 1); 2 }
-            0x4A => { self.cpu.bit(self.cpu.rd, 1); 2 }
-            0x4B => { self.cpu.bit(self.cpu.re, 1); 2 }
-            0x4C => { self.cpu.bit(self.cpu.rh, 1); 2 }
-            0x4D => { self.cpu.bit(self.cpu.rl, 1); 2 }
-            0x4E => { 
+            0x48 => {
+                self.cpu.bit(self.cpu.rb, 1);
+                2
+            }
+            0x49 => {
+                self.cpu.bit(self.cpu.rc, 1);
+                2
+            }
+            0x4A => {
+                self.cpu.bit(self.cpu.rd, 1);
+                2
+            }
+            0x4B => {
+                self.cpu.bit(self.cpu.re, 1);
+                2
+            }
+            0x4C => {
+                self.cpu.bit(self.cpu.rh, 1);
+                2
+            }
+            0x4D => {
+                self.cpu.bit(self.cpu.rl, 1);
+                2
+            }
+            0x4E => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 1);
                 3
             }
-            0x4F => { self.cpu.bit(self.cpu.ra, 1); 2 }
+            0x4F => {
+                self.cpu.bit(self.cpu.ra, 1);
+                2
+            }
 
-            0x50 => { self.cpu.bit(self.cpu.rb, 2); 2 }
-            0x51 => { self.cpu.bit(self.cpu.rc, 2); 2 }
-            0x52 => { self.cpu.bit(self.cpu.rd, 2); 2 }
-            0x53 => { self.cpu.bit(self.cpu.re, 2); 2 }
-            0x54 => { self.cpu.bit(self.cpu.rh, 2); 2 }
-            0x55 => { self.cpu.bit(self.cpu.rl, 2); 2 }
-            0x56 => { 
+            0x50 => {
+                self.cpu.bit(self.cpu.rb, 2);
+                2
+            }
+            0x51 => {
+                self.cpu.bit(self.cpu.rc, 2);
+                2
+            }
+            0x52 => {
+                self.cpu.bit(self.cpu.rd, 2);
+                2
+            }
+            0x53 => {
+                self.cpu.bit(self.cpu.re, 2);
+                2
+            }
+            0x54 => {
+                self.cpu.bit(self.cpu.rh, 2);
+                2
+            }
+            0x55 => {
+                self.cpu.bit(self.cpu.rl, 2);
+                2
+            }
+            0x56 => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 2);
                 3
             }
-            0x57 => { self.cpu.bit(self.cpu.ra, 2); 2 }
+            0x57 => {
+                self.cpu.bit(self.cpu.ra, 2);
+                2
+            }
 
-            0x58 => { self.cpu.bit(self.cpu.rb, 3); 2 }
-            0x59 => { self.cpu.bit(self.cpu.rc, 3); 2 }
-            0x5A => { self.cpu.bit(self.cpu.rd, 3); 2 }
-            0x5B => { self.cpu.bit(self.cpu.re, 3); 2 }
-            0x5C => { self.cpu.bit(self.cpu.rh, 3); 2 }
-            0x5D => { self.cpu.bit(self.cpu.rl, 3); 2 }
-            0x5E => { 
+            0x58 => {
+                self.cpu.bit(self.cpu.rb, 3);
+                2
+            }
+            0x59 => {
+                self.cpu.bit(self.cpu.rc, 3);
+                2
+            }
+            0x5A => {
+                self.cpu.bit(self.cpu.rd, 3);
+                2
+            }
+            0x5B => {
+                self.cpu.bit(self.cpu.re, 3);
+                2
+            }
+            0x5C => {
+                self.cpu.bit(self.cpu.rh, 3);
+                2
+            }
+            0x5D => {
+                self.cpu.bit(self.cpu.rl, 3);
+                2
+            }
+            0x5E => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 3);
                 3
             }
-            0x5F => { self.cpu.bit(self.cpu.ra, 3); 2 }
+            0x5F => {
+                self.cpu.bit(self.cpu.ra, 3);
+                2
+            }
 
-            0x60 => { self.cpu.bit(self.cpu.rb, 4); 2 }
-            0x61 => { self.cpu.bit(self.cpu.rc, 4); 2 }
-            0x62 => { self.cpu.bit(self.cpu.rd, 4); 2 }
-            0x63 => { self.cpu.bit(self.cpu.re, 4); 2 }
-            0x64 => { self.cpu.bit(self.cpu.rh, 4); 2 }
-            0x65 => { self.cpu.bit(self.cpu.rl, 4); 2 }
-            0x66 => { 
+            0x60 => {
+                self.cpu.bit(self.cpu.rb, 4);
+                2
+            }
+            0x61 => {
+                self.cpu.bit(self.cpu.rc, 4);
+                2
+            }
+            0x62 => {
+                self.cpu.bit(self.cpu.rd, 4);
+                2
+            }
+            0x63 => {
+                self.cpu.bit(self.cpu.re, 4);
+                2
+            }
+            0x64 => {
+                self.cpu.bit(self.cpu.rh, 4);
+                2
+            }
+            0x65 => {
+                self.cpu.bit(self.cpu.rl, 4);
+                2
+            }
+            0x66 => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 4);
                 3
             }
-            0x67 => { self.cpu.bit(self.cpu.ra, 4); 2 }
+            0x67 => {
+                self.cpu.bit(self.cpu.ra, 4);
+                2
+            }
 
-            0x68 => { self.cpu.bit(self.cpu.rb, 5); 2 }
-            0x69 => { self.cpu.bit(self.cpu.rc, 5); 2 }
-            0x6A => { self.cpu.bit(self.cpu.rd, 5); 2 }
-            0x6B => { self.cpu.bit(self.cpu.re, 5); 2 }
-            0x6C => { self.cpu.bit(self.cpu.rh, 5); 2 }
-            0x6D => { self.cpu.bit(self.cpu.rl, 5); 2 }
-            0x6E => { 
+            0x68 => {
+                self.cpu.bit(self.cpu.rb, 5);
+                2
+            }
+            0x69 => {
+                self.cpu.bit(self.cpu.rc, 5);
+                2
+            }
+            0x6A => {
+                self.cpu.bit(self.cpu.rd, 5);
+                2
+            }
+            0x6B => {
+                self.cpu.bit(self.cpu.re, 5);
+                2
+            }
+            0x6C => {
+                self.cpu.bit(self.cpu.rh, 5);
+                2
+            }
+            0x6D => {
+                self.cpu.bit(self.cpu.rl, 5);
+                2
+            }
+            0x6E => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 5);
                 3
             }
-            0x6F => { self.cpu.bit(self.cpu.ra, 5); 2 }
+            0x6F => {
+                self.cpu.bit(self.cpu.ra, 5);
+                2
+            }
 
-            0x70 => { self.cpu.bit(self.cpu.rb, 6); 2 }
-            0x71 => { self.cpu.bit(self.cpu.rc, 6); 2 }
-            0x72 => { self.cpu.bit(self.cpu.rd, 6); 2 }
-            0x73 => { self.cpu.bit(self.cpu.re, 6); 2 }
-            0x74 => { self.cpu.bit(self.cpu.rh, 6); 2 }
-            0x75 => { self.cpu.bit(self.cpu.rl, 6); 2 }
-            0x76 => { 
+            0x70 => {
+                self.cpu.bit(self.cpu.rb, 6);
+                2
+            }
+            0x71 => {
+                self.cpu.bit(self.cpu.rc, 6);
+                2
+            }
+            0x72 => {
+                self.cpu.bit(self.cpu.rd, 6);
+                2
+            }
+            0x73 => {
+                self.cpu.bit(self.cpu.re, 6);
+                2
+            }
+            0x74 => {
+                self.cpu.bit(self.cpu.rh, 6);
+                2
+            }
+            0x75 => {
+                self.cpu.bit(self.cpu.rl, 6);
+                2
+            }
+            0x76 => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 6);
                 3
             }
-            0x77 => { self.cpu.bit(self.cpu.ra, 6); 2 }
+            0x77 => {
+                self.cpu.bit(self.cpu.ra, 6);
+                2
+            }
 
-            0x78 => { self.cpu.bit(self.cpu.rb, 7); 2 }
-            0x79 => { self.cpu.bit(self.cpu.rc, 7); 2 }
-            0x7A => { self.cpu.bit(self.cpu.rd, 7); 2 }
-            0x7B => { self.cpu.bit(self.cpu.re, 7); 2 }
-            0x7C => { self.cpu.bit(self.cpu.rh, 7); 2 }
-            0x7D => { self.cpu.bit(self.cpu.rl, 7); 2 }
-            0x7E => { 
+            0x78 => {
+                self.cpu.bit(self.cpu.rb, 7);
+                2
+            }
+            0x79 => {
+                self.cpu.bit(self.cpu.rc, 7);
+                2
+            }
+            0x7A => {
+                self.cpu.bit(self.cpu.rd, 7);
+                2
+            }
+            0x7B => {
+                self.cpu.bit(self.cpu.re, 7);
+                2
+            }
+            0x7C => {
+                self.cpu.bit(self.cpu.rh, 7);
+                2
+            }
+            0x7D => {
+                self.cpu.bit(self.cpu.rl, 7);
+                2
+            }
+            0x7E => {
                 let hl = self.get(self.cpu.hl());
                 self.cpu.bit(hl, 7);
                 3
             }
-            0x7F => { self.cpu.bit(self.cpu.ra, 7); 2 }
-
+            0x7F => {
+                self.cpu.bit(self.cpu.ra, 7);
+                2
+            }
 
             0x80 => res(&mut self.cpu.rb, 0),
             0x81 => res(&mut self.cpu.rc, 0),
@@ -1841,7 +2195,6 @@ impl Runtime<'_> {
             }
             0xCF => set(&mut self.cpu.ra, 1),
 
-
             0xD0 => set(&mut self.cpu.rb, 2),
             0xD1 => set(&mut self.cpu.rc, 2),
             0xD2 => set(&mut self.cpu.rd, 2),
@@ -1870,7 +2223,6 @@ impl Runtime<'_> {
             }
             0xDF => set(&mut self.cpu.ra, 3),
 
-
             0xE0 => set(&mut self.cpu.rb, 4),
             0xE1 => set(&mut self.cpu.rc, 4),
             0xE2 => set(&mut self.cpu.rd, 4),
@@ -1898,7 +2250,6 @@ impl Runtime<'_> {
                 4
             }
             0xEF => set(&mut self.cpu.ra, 5),
-
 
             0xF0 => set(&mut self.cpu.rb, 6),
             0xF1 => set(&mut self.cpu.rc, 6),
@@ -1973,7 +2324,6 @@ fn add_u16(a: u16, b: u16) -> (u8, u8, u16) {
     let hc = (((a & 0xFFF) + (b & 0xFFF)) & 0x1000) == 0x1000;
     return (cy as u8, hc as u8, res as u16);
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -2075,7 +2425,7 @@ mod tests {
 
     #[test]
     fn test_add_u16_has_carry() {
-        let max = ((1 << 16) -1) as u16;
+        let max = ((1 << 16) - 1) as u16;
         let (cy, h, res) = add_u16(max, max);
 
         assert_eq!(cy, 1);
@@ -2107,7 +2457,7 @@ mod tests {
     fn test_push_pop_af() {
         let mut cpu = CpuRegisters::new();
         cpu.set_af(0x1234);
-        
+
         assert_eq!(cpu.af(), 0x1234 & 0xFFF0);
         assert_eq!(cpu.ra, 0x12);
         assert_eq!(cpu.rf, 0x34 & 0xF0);
