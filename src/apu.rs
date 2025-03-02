@@ -523,7 +523,6 @@ impl Voice4 {
         let lsb = self.lfsr as u8 & 0b1;
         self.lfsr = self.lfsr >> 1;
 
-
         // set the now empty msb to the result of the xor
         self.lfsr |= 0x8000 * val as u16;
 
@@ -533,11 +532,9 @@ impl Voice4 {
             self.lfsr |= 0x0080 * val as u16; // set the 7th bit
         }
 
-
         self.lfsr_bit = lsb;
     }
 }
-
 
 impl BitChannel for Voice4 {
     fn is_active(&self) -> bool {
@@ -549,13 +546,17 @@ impl BitChannel for Voice4 {
             return;
         }
 
-        let divider = if self.clock_div == 0 { 0.5 } else { self.clock_div as f32};
+        let divider = if self.clock_div == 0 {
+            0.5
+        } else {
+            self.clock_div as f32
+        };
         let freq_hz = 262144.0 / (divider * (1 << self.clock_shift) as f32);
         let step = freq_hz / 44100.0;
 
         for (i, x) in out.iter_mut().enumerate() {
             let output = if self.lfsr_bit == 1 {
-                self.volume as f32 / 7.0
+                self.volume as f32 / 15.0
             } else {
                 0.0
             };
@@ -598,7 +599,7 @@ impl BitChannel for Voice4 {
                 while self.sweep_vol_timer <= 0 {
                     self.sweep_vol_timer += 8 * (self.sweep as i16);
 
-                    if self.envelope > 0 && self.volume < 0x7 {
+                    if self.envelope > 0 && self.volume < 0xF {
                         self.volume += 1;
                     } else if self.envelope == 0 && self.volume > 0 {
                         // pandocs: "the envelope reaching a volume of 0 does NOT turn the channel
@@ -615,7 +616,6 @@ impl BitChannel for Voice4 {
             self.length = nr41 & 0x3F;
             self.phase = 0.0;
             self.sweep_len_timer = 2;
-
 
             // volume, dir, sweep
             // lookup nr42
