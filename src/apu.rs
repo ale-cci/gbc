@@ -36,7 +36,7 @@ impl APU {
             spec: AudioSpecDesired {
                 freq: Some(44100), // samples per seconds
                 channels: Some(CHANNELS),
-                samples: Some(256), // a power of 2, the audio buffer size in samples
+                samples: Some(128), // a power of 2, the audio buffer size in samples
             },
             chan_volume: [0.0, 0.0],
 
@@ -413,9 +413,8 @@ impl BitChannel for Voice3 {
             return;
         }
 
-        let tone_freq_hz = 65536.0 / (2048.0 - self.period as f32) * 32.0;
-
-        let step = tone_freq_hz / 44100.0;
+        let freq_hz = 2097152.0 / (2048.0 - self.period as f32);
+        let step = freq_hz / 44100.0;
 
         for (i, x) in out.iter_mut().enumerate() {
             let note = self.get_sample(self.idx as usize);
@@ -493,12 +492,52 @@ impl BitChannel for Voice3 {
 struct Voice4 {
     phase: f32,
     on: bool,
-    length_timer: u8,
+    length: u8,
     clock_shift: u8,
     lfsr_width: u8,
     clock_div: u8,
     length_enable: bool,
+
+    lfsr: u16,
+
+    volume: u8,
+    envelope: u8,
+    sweep: u8,
+
+    sweep_len_timer: i16,
+    sweep_vol_timer: i16,
+
+    lfsr_bit: u8,
+    dac_on: bool,
 }
+
+impl Voice4 {
+    fn lfsr_next_bit(&mut self) {
+        let bit0 = self.lfsr as u8 & 0b01;
+        let bit1 = (self.lfsr as u8 & 0b10) >> 1;
+
+        // xnor
+        let val = (!(bit0 ^ bit1)) & 0b1;
+        assert!(val == 0 || val == 1);
+
+        let lsb = self.lfsr as u8 & 0b1;
+        self.lfsr = self.lfsr >> 1;
+
+
+        // set the now empty msb to the result of the xor
+        self.lfsr |= 0x8000 * val as u16;
+
+        // if mode is 1, set the 7th bit too
+        if self.lfsr_width == 1 {
+            self.lfsr &= 0xFF3F; // zero out the 7th bit
+            self.lfsr |= 0x0080 * val as u16; // set the 7th bit
+        }
+
+
+        self.lfsr_bit = lsb;
+    }
+}
+
 
 impl BitChannel for Voice4 {
     fn is_active(&self) -> bool {
@@ -509,6 +548,28 @@ impl BitChannel for Voice4 {
         if !self.is_active() {
             return;
         }
+
+        let divider = if self.clock_div == 0 { 0.5 } else { self.clock_div as f32};
+        let freq_hz = 262144.0 / (divider * (1 << self.clock_shift) as f32);
+        let step = freq_hz / 44100.0;
+
+        for (i, x) in out.iter_mut().enumerate() {
+            let output = if self.lfsr_bit == 1 {
+                self.volume as f32 / 7.0
+            } else {
+                0.0
+            };
+
+            *x += output;
+
+            if i % channels == (channels - 1) {
+                self.phase += step;
+                if self.phase >= 1.0 {
+                    self.phase %= 1.0;
+                    self.lfsr_next_bit();
+                }
+            }
+        }
     }
 
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
@@ -516,21 +577,63 @@ impl BitChannel for Voice4 {
         let nr42 = rt.get(NR42);
         let nr43 = rt.get(NR43);
         let nr44 = rt.get(NR44);
-        let trigger = get_bit(nr44, 7);
+        self.dac_on = (nr42 & 0xf8) != 0;
 
+        if self.on {
+            if self.length_enable {
+                self.sweep_len_timer -= rt.timer.delta_div as i16;
+
+                while self.sweep_len_timer <= 0 {
+                    self.sweep_len_timer += 2;
+                    if self.length < 64 {
+                        self.length += 1;
+                    } else {
+                        self.on = false;
+                    }
+                }
+            }
+
+            if self.sweep != 0 {
+                self.sweep_vol_timer -= rt.timer.delta_div as i16;
+                while self.sweep_vol_timer <= 0 {
+                    self.sweep_vol_timer += 8 * (self.sweep as i16);
+
+                    if self.envelope > 0 && self.volume < 0x7 {
+                        self.volume += 1;
+                    } else if self.envelope == 0 && self.volume > 0 {
+                        // pandocs: "the envelope reaching a volume of 0 does NOT turn the channel
+                        // off."
+                        self.volume -= 1;
+                    }
+                }
+            }
+        }
+
+        let trigger = get_bit(nr44, 7);
         self.length_enable = get_bit(nr44, 6) == 1;
         if trigger == 1 {
-            self.length_timer = nr41 & 0b00111111;
+            self.length = nr41 & 0x3F;
             self.phase = 0.0;
+            self.sweep_len_timer = 2;
+
 
             // volume, dir, sweep
             // lookup nr42
-            self.clock_div = nr43 & 0b11;
-            self.lfsr_width = get_bit(nr43, 3);
-            self.clock_shift = nr43 >> 4;
+            self.volume = nr42 >> 4;
+            self.envelope = get_bit(nr42, 3);
+            self.sweep = nr42 & 0b111;
+
+            self.sweep_vol_timer = 8 * self.sweep as i16;
 
             rt.hwset(NR44, set_bit(nr44, 7, false));
+            self.on = true;
+            self.lfsr = 0;
+            self.lfsr_bit = 0;
         }
+
+        self.clock_div = nr43 & 0b111;
+        self.lfsr_width = get_bit(nr43, 3);
+        self.clock_shift = nr43 >> 4;
     }
 }
 
