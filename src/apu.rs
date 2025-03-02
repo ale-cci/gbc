@@ -27,6 +27,7 @@ fn wave_duty_lookup(value: u8) -> f32 {
         _ => panic!("Value {value} not valid"),
     };
 }
+const FREQ: f32 = 44100.0;
 
 impl APU {
     pub fn new() -> Self {
@@ -34,9 +35,9 @@ impl APU {
 
         APU {
             spec: AudioSpecDesired {
-                freq: Some(44100), // samples per seconds
+                freq: Some(FREQ as i32), // samples per seconds
                 channels: Some(CHANNELS),
-                samples: Some(128), // a power of 2, the audio buffer size in samples
+                samples: Some(256), // a power of 2, the audio buffer size in samples
             },
             chan_volume: [0.0, 0.0],
 
@@ -238,7 +239,7 @@ impl BitChannel for Voice1 {
 
         let phase_increment = pi_from_period(self.period);
         let freq = 1.0 / phase_increment;
-        let phase_increment = freq / 44100.0;
+        let phase_increment = freq / FREQ;
 
         let duty = wave_duty_lookup(self.wave_duty);
         let volume = self.volume as f32 / 15.0;
@@ -289,7 +290,7 @@ impl BitChannel for Voice2 {
         let duty = wave_duty_lookup(self.wave_duty);
         let volume = self.volume as f32 / 15.0;
 
-        let phase_increment = freq / 44100.0;
+        let phase_increment = freq / FREQ;
 
         for (i, x) in out.iter_mut().enumerate() {
             *x += if self.phase < duty { volume } else { -volume };
@@ -414,7 +415,7 @@ impl BitChannel for Voice3 {
         }
 
         let freq_hz = 2097152.0 / (2048.0 - self.period as f32);
-        let step = freq_hz / 44100.0;
+        let step = freq_hz / FREQ;
 
         for (i, x) in out.iter_mut().enumerate() {
             let note = self.get_sample(self.idx as usize);
@@ -513,46 +514,52 @@ struct Voice4 {
 
 impl Voice4 {
     fn lfsr_next_bit(&mut self) {
-        let bit0 = self.lfsr as u8 & 0b01;
-        let bit1 = (self.lfsr as u8 & 0b10) >> 1;
+        let bit0 = self.lfsr as u8 & 0b1;
+        self.lfsr >>= 1;
+        let bit1 = self.lfsr as u8 & 0b1;
 
         // xnor
         let val = (!(bit0 ^ bit1)) & 0b1;
         assert!(val == 0 || val == 1);
 
-        let lsb = self.lfsr as u8 & 0b1;
-        self.lfsr = self.lfsr >> 1;
-
         // set the now empty msb to the result of the xor
-        self.lfsr |= 0x8000 * val as u16;
-
-        // if mode is 1, set the 7th bit too
         if self.lfsr_width == 1 {
-            self.lfsr &= 0xFF3F; // zero out the 7th bit
-            self.lfsr |= 0x0080 * val as u16; // set the 7th bit
+            // set both bit 7 & 15 if mode is 1
+            self.lfsr &= 0xFF3F;
+            self.lfsr |= 0x8080 * val as u16;
+        } else {
+            // set just bit 15
+            self.lfsr |= 0x8000 * val as u16;
         }
 
-        self.lfsr_bit = lsb;
+        self.lfsr_bit = bit0;
     }
 }
 
 impl BitChannel for Voice4 {
     fn is_active(&self) -> bool {
-        return self.on;
+        return self.on && self.dac_on;
     }
 
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
-        if !self.is_active() {
+        if !self.is_active() && self.volume > 0{
             return;
         }
 
-        let divider = if self.clock_div == 0 {
-            0.5
-        } else {
-            self.clock_div as f32
+        let divider = match self.clock_div {
+            0 => 8,
+            1 => 16,
+            2 => 32,
+            3 => 48,
+            4 => 64,
+            5 => 80,
+            6 => 96,
+            7 =>112,
+            code => panic!("unexpaected code {code}")
         };
-        let freq_hz = 262144.0 / (divider * (1 << self.clock_shift) as f32);
-        let step = freq_hz / 44100.0;
+
+        let freq_hz = 262144.0 / (divider << self.clock_shift) as f32;
+        let step = freq_hz / FREQ;
 
         for (i, x) in out.iter_mut().enumerate() {
             let output = if self.lfsr_bit == 1 {
@@ -565,8 +572,8 @@ impl BitChannel for Voice4 {
 
             if i % channels == (channels - 1) {
                 self.phase += step;
-                if self.phase >= 1.0 {
-                    self.phase %= 1.0;
+                while self.phase >= 1.0 {
+                    self.phase -= 1.0;
                     self.lfsr_next_bit();
                 }
             }
