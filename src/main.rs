@@ -91,11 +91,12 @@ fn main() {
     let mut ppu = PPU::new();
 
     let refresh_target = time::Duration::from_micros(1_000_000 / 60);
-    let clock_target = time::Duration::from_nanos(1_000_000_000 / 4194304);
+    let clock_target = time::Duration::from_nanos(1_000_000_000 / 4194304).as_nanos();
 
     let mut ft = time::Instant::now();
     let mut tick = time::Instant::now();
 
+    let speed = 1;
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -127,7 +128,7 @@ fn main() {
             }
         }
 
-        let ticks = (tick.elapsed().as_nanos() / clock_target.as_nanos()) / 4;
+        let ticks = (tick.elapsed().as_nanos() / clock_target) / (4 * speed);
         for _ in 0..ticks {
             let cc = rt.tick();
             rt.tick_timer(cc * 4);

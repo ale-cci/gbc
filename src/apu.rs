@@ -34,9 +34,9 @@ impl APU {
 
         APU {
             spec: AudioSpecDesired {
-                freq: Some(44100),
+                freq: Some(44100), // samples per seconds
                 channels: Some(CHANNELS),
-                samples: None,
+                samples: Some(8), // a power of 2, the audio buffer size in samples
             },
             chan_volume: [0.0, 0.0],
 
@@ -184,7 +184,6 @@ impl BitChannel for Voice1 {
                         // off."
                         self.volume -= 1;
                     }
-
                 }
             }
         }
@@ -198,35 +197,38 @@ impl BitChannel for Voice1 {
 
         let trigger = get_bit(nr14, 7) == 1;
 
-        self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8); // frequency
-        self.wave_duty = (nr11 & 0b11000000) >> 6;
+        self.chan_volume = [get_bit(nr51, 4) as f32, get_bit(nr51, 0) as f32];
+
         self.step = nr10 & 0b111;
-        self.sweep = nr12 & 0b111; // envelope period
         self.direction = get_bit(nr10, 3);
         self.pace = (nr10 & 0b1110000) >> 4;
-        self.chan_volume = [get_bit(nr51, 4) as f32, get_bit(nr51, 0) as f32];
-        self.volume = (nr12 & 0b11110000) >> 4;
 
-        if trigger && !self.on {
+        self.wave_duty = (nr11 & 0b11000000) >> 6;
+
+        self.length_enable = get_bit(nr14, 6) == 1;
+
+        if trigger {
             self.period_sweeps = 0;
             // update voice 1
             self.sweep_freq_timer = self.pace as i16 * 4; // 128hz
 
+            self.period = nr13 as u16 + ((nr14 as u16 & 0b111) << 8); // frequency
             self.phase = 0.0;
 
             self.length = nr11 & 0b111111;
+
+            // re-triggering is required for updating this channel.
+            self.sweep = nr12 & 0b111; // envelope period
+            self.volume = (nr12 & 0b11110000) >> 4;
             self.envelope = get_bit(nr12, 3);
+
             self.sweep_vol_timer = 8 * self.sweep as i16; // 64hz
 
-            self.length_enable = get_bit(nr14, 6) == 1;
             self.sweep_len_timer = 2; // 256hz
 
             self.on = trigger;
             rt.hwset(NR14, set_bit(nr14, 7, false));
         }
-
-
-
     }
 
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
@@ -237,16 +239,13 @@ impl BitChannel for Voice1 {
         let phase_increment = pi_from_period(self.period);
         let freq = 1.0 / phase_increment;
 
-        // println!("ch1: freq({}) vol({}) env({}) duty({})", self.period, self.volume, self.sweep, self.wave_duty);
-        // println!("hz: {}", freq);
         let duty = wave_duty_lookup(self.wave_duty);
         let volume = self.volume as f32 / 15.0;
 
         let phase_increment = freq / 44100.0;
 
-
         for (i, x) in out.iter_mut().enumerate() {
-            *x = if self.phase < duty { volume } else { -volume };
+            *x += if self.phase < duty { volume } else { -volume };
 
             if i % channels == (channels - 1) {
                 self.phase = (self.phase + phase_increment) % 1.0;
@@ -274,6 +273,7 @@ struct Voice2 {
     dac_on: bool,
 
     sweep_len_timer: i16,
+    sweep_vol_timer: i16,
 }
 
 impl BitChannel for Voice2 {
@@ -292,15 +292,13 @@ impl BitChannel for Voice2 {
 
         let phase_increment = freq / 44100.0;
 
-
         for (i, x) in out.iter_mut().enumerate() {
-            *x = if self.phase < duty { volume } else { -volume };
+            *x += if self.phase < duty { volume } else { -volume };
 
             if i % channels == (channels - 1) {
                 self.phase = (self.phase + phase_increment) % 1.0;
             }
         }
-
     }
 
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
@@ -322,6 +320,21 @@ impl BitChannel for Voice2 {
                     }
                 }
             }
+
+            if self.sweep != 0 {
+                self.sweep_vol_timer -= rt.timer.delta_div as i16;
+                while self.sweep_vol_timer <= 0 {
+                    self.sweep_vol_timer += 8 * (self.sweep as i16);
+
+                    if self.envelope > 0 && self.volume < 0xF {
+                        self.volume += 1;
+                    } else if self.envelope == 0 && self.volume > 0 {
+                        // pandocs: "the envelope reaching a volume of 0 does NOT turn the channel
+                        // off."
+                        self.volume -= 1;
+                    }
+                }
+            }
         }
 
         let nr21 = rt.get(NR21);
@@ -334,28 +347,25 @@ impl BitChannel for Voice2 {
 
         self.chan_volume = [get_bit(nr51, 5) as f32, get_bit(nr51, 1) as f32];
         self.wave_duty = (nr21 & 0b11000000) >> 6;
-        self.length = nr21 & 0b111111;
-        self.volume = (nr22 & 0b11110000) >> 4;
-        self.envelope = get_bit(nr22, 3);
-        self.sweep = nr22 & 0b111;
-        self.period = nr23 as u16 + ((nr24 as u16 & 0b111) << 8);
 
-        if trigger && !self.on {
+        self.length_enable = get_bit(nr24, 6) == 1;
+
+        if trigger {
+            self.period = nr23 as u16 + ((nr24 as u16 & 0b111) << 8);
+            self.phase = 0.0;
+
+            self.length = nr21 & 0b111111;
+
+            self.volume = (nr22 & 0b11110000) >> 4;
+            self.envelope = get_bit(nr22, 3);
+            self.sweep = nr22 & 0b111;
+            self.sweep_vol_timer += 8 * (self.sweep as i16);
 
             self.sweep_len_timer = 2;
-            self.length_enable = get_bit(nr24, 6) == 1;
-            if !self.trigger {
-                self.trigger = get_bit(nr24, 7) == 1;
-                if self.trigger {
-                    rt.hwset(NR24, set_bit(nr24, 7, false))
-                }
-            }
 
             self.on = true;
             rt.hwset(NR24, set_bit(nr24, 7, false));
         }
-
-
     }
 }
 
@@ -364,41 +374,106 @@ struct Voice3 {
     dac: bool,
     phase: f32,
     length_enable: bool,
-    length: u8,
-    trigger: bool,
+    length: u16,
     volume: f32,
     period: u16,
+    on: bool,
+    idx: u8,
     pattern: [u8; 16],
+    sweep_len_timer: i16,
 }
+
+impl Voice3 {
+    fn get_sample(&self, idx: usize) -> f32 {
+        assert!(idx < 16);
+
+        let value = self.pattern[idx / 2];
+        let nibble = if idx % 2 == 0 {
+            value >> 4
+        } else {
+            value & 0b1111
+        };
+
+        let nibble_f32 = nibble as f32 / (0b1111 as f32);
+        let nibble_f32 = (nibble_f32 - 0.5) * 2.0; // check if this is correct, translates the wave
+                                                   // into -1/+1 range instead of 0/+1
+        return nibble_f32;
+    }
+}
+
 impl BitChannel for Voice3 {
     fn is_active(&self) -> bool {
-        return false;
+        return self.dac;
     }
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
         if !self.is_active() {
             return;
         }
-        println!("voice3 on");
+        // according to https://gbdev.io/pandocs/Audio_Registers.html#ff1d--nr33-channel-3-period-low-write-only
+        let tone_freq_hz = 65536.0 / (2048.0 - self.period as f32);
+        // println!("hz: {tone_freq_hz}");
+
+        let sample_rate = 2094152.0 / (2048.0 - self.period as f32);
+
+        // its 32 times the ch. freq
+
+        for (i, x) in out.iter_mut().enumerate() {
+            let note = self.get_sample(self.idx.into());
+
+            // *x = (note as f32 / 15.0) * self.volume;
+
+            if i % channels == channels - 1 {
+                self.idx = (self.idx + 1) % 16;
+            }
+        }
+        // println!("voice3 on");
     }
     fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+        let nr30 = rt.get(NR30);
+        let nr31 = rt.get(NR31);
+        let nr32 = rt.get(NR32);
+        let nr33 = rt.get(NR33);
         let nr34 = rt.get(NR34);
-        self.dac = get_bit(rt.get(NR30), 7) == 1;
-        self.length = rt.get(NR31);
-        self.volume = match (rt.get(NR32) & 0b1100000) >> 5 {
-            0 => 0.0,
-            1 => 1.0,
-            2 => 0.5,
-            3 => 0.25,
-            v => panic!("Value {v} not allowed"),
-        };
-        self.period = rt.get(NR33) as u16 + ((nr34 as u16 & 0b111) << 8);
+
+        if self.on {
+            if self.length_enable {
+                self.sweep_len_timer -= rt.timer.delta_div as i16;
+
+                while self.sweep_len_timer <= 0 {
+                    self.sweep_len_timer += 2;
+
+                    if self.length < 256 {
+                        self.length += 1;
+                    } else {
+                        self.on = false;
+                    }
+                }
+            }
+
+            // period changes...
+        }
+
+        self.dac = get_bit(nr30, 7) == 1;
+        self.length = nr31 as u16;
+        self.period = nr33 as u16 + ((nr34 as u16 & 0b111) << 8);
         self.length_enable = get_bit(nr34, 6) == 1;
 
-        if !self.trigger {
-            self.trigger = get_bit(nr34, 7) == 1;
-            if self.trigger {
-                rt.hwset(NR34, set_bit(nr34, 7, false));
-            }
+        let trigger = get_bit(nr34, 7) == 1;
+
+        if trigger {
+            self.idx = 0;
+            // period div
+            self.volume = match (nr32 & 0b1100000) >> 5 {
+                0 => 0.0,
+                1 => 1.0,
+                2 => 0.5,
+                3 => 0.25,
+                v => panic!("Value {v} not allowed"),
+            };
+
+            self.on = true;
+            // reset the trigger
+            rt.hwset(NR34, set_bit(nr34, 7, false));
         }
 
         for (i, addr) in (0xFF30..=0xFF3F).enumerate() {
@@ -410,12 +485,17 @@ impl BitChannel for Voice3 {
 #[derive(Default)]
 struct Voice4 {
     phase: f32,
-    trigger: bool,
+    on: bool,
+    length_timer: u8,
+    clock_shift: u8,
+    lfsr_width: u8,
+    clock_div: u8,
+    length_enable: bool,
 }
 
 impl BitChannel for Voice4 {
     fn is_active(&self) -> bool {
-        return false;
+        return self.on;
     }
 
     fn overlap(&mut self, out: &mut [f32], channels: usize) {
@@ -424,7 +504,27 @@ impl BitChannel for Voice4 {
         }
     }
 
-    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {}
+    fn tick(&mut self, ticks: u8, rt: &mut Runtime) {
+        let nr41 = rt.get(NR41);
+        let nr42 = rt.get(NR42);
+        let nr43 = rt.get(NR43);
+        let nr44 = rt.get(NR44);
+        let trigger = get_bit(nr44, 7);
+
+        self.length_enable = get_bit(nr44, 6) == 1;
+        if trigger == 1 {
+            self.length_timer = nr41 & 0b00111111;
+            self.phase = 0.0;
+
+            // volume, dir, sweep
+            // lookup nr42
+            self.clock_div = nr43 & 0b11;
+            self.lfsr_width = get_bit(nr43, 3);
+            self.clock_shift = nr43 >> 4;
+
+            rt.hwset(NR44, set_bit(nr44, 7, false));
+        }
+    }
 }
 
 fn pi_from_period(period: u16) -> f32 {
@@ -448,7 +548,7 @@ impl AudioCallback for &mut APU {
         self.voice4.overlap(out, channels);
 
         for (i, x) in out.iter_mut().enumerate() {
-            *x = *x * self.chan_volume[i % 2 as usize] * self.master_volume;
+            *x = (*x / 4.0) * self.chan_volume[i % 2 as usize] * self.master_volume;
         }
     }
 }
