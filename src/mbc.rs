@@ -18,8 +18,8 @@ pub struct RomMBC3<'a> {
     rom: &'a Vec<u8>,
     rom_bank: u8,
     exram_enable: bool,
-    ram_bank: u8,
-    rtc_reg: u8,
+    bank_or_rtc: u8,
+    ram: Vec<Vec<u8>>,
 }
 
 impl RomMBC3<'_> {
@@ -28,8 +28,8 @@ impl RomMBC3<'_> {
             rom,
             rom_bank: 1,
             exram_enable: false,
-            rtc_reg: 0,
-            ram_bank: 0,
+            bank_or_rtc: 0,
+            ram: vec![vec![0; 0x2000]; 4],
         };
     }
 }
@@ -55,17 +55,15 @@ impl Rom<'_> for RomMBC3<'_> {
             }
             0x4000..=0x5FFF => {
                 // ram bank or rtc register select
-                if val <= 0x03 {
-                    self.ram_bank = val;
-                    self.rtc_reg = 0;
-                }
-                else if val >= 0x08 && val <= 0x0C {
-                    self.rtc_reg = val;
-                    self.ram_bank = 0;
-                }
+                self.bank_or_rtc = val;
             }
             0x6000..=0x7FFF => {
                 // latch clock data
+            }
+            0xA000..=0xBFFF => {
+                if self.bank_or_rtc <= 3 {
+                    self.ram[self.bank_or_rtc as usize][addr as usize - 0xA000] = val;
+                }
             }
             _ => {}
         }
@@ -80,6 +78,10 @@ impl Rom<'_> for RomMBC3<'_> {
             }
             0xA000..=0xBFFF => {
                 // select ram bank or the rtc_reg
+                if self.bank_or_rtc <= 3 {
+                    return self.ram[self.bank_or_rtc as usize][addr as usize - 0xA000];
+                } else if self.bank_or_rtc >= 8 && self.bank_or_rtc <= 0x0C {
+                }
                 0
             }
             _ => {

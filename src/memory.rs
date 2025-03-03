@@ -93,7 +93,8 @@ impl Memory for MMU<'_> {
                 let read_mask = self.wram[addr as usize - 0xA000];
                 get_inputs(read_mask, self.inputs)
             }
-            0xA000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
+            0xA000..=0xBFFF => self.rom.get(addr),
+            0xC000..=0xFFFF => self.wram[(addr - 0xA000) as usize],
             _ => {
                 panic!("Memory access out of bounds! {}", b64(addr));
             }
@@ -143,7 +144,8 @@ impl Memory for MMU<'_> {
             0xFF46 => {
                 self.dma(val);
             }
-            0xA000..=0xFFFF => {
+            0xA000..=0xBFFF => self.rom.set(addr, val),
+            0xC000..=0xFFFF => {
                 self.wram[(addr - 0xA000) as usize] = val
             },
             _ => {
