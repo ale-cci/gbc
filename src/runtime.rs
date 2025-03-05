@@ -544,7 +544,8 @@ impl Runtime<'_> {
                 1
             }
             0x10 => {
-                panic!("STOP!");
+                println!("STOP instruction, enter CPU low power mode");
+                1 // panic!("STOP!");
             }
             0x11 => {
                 let l = self.next_opcode();

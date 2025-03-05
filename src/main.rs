@@ -56,6 +56,25 @@ fn get_btn(sdl_key: &str) -> Option<HWInput> {
     };
 }
 
+enum RomMBC<'a> {
+    RomMBC3(RomMBC3<'a>),
+    RomNoMBC(RomNoMBC<'a>),
+}
+
+impl Rom<'_> for RomMBC<'_> {
+    fn set(&mut self, addr: u16, val: u8) {
+        return match self {
+            RomMBC::RomMBC3(item) => item.set(addr, val),
+            RomMBC::RomNoMBC(item) => item.set(addr, val),
+        }
+    }
+    fn get(&self, addr: u16) -> u8 {
+        return match self {
+            RomMBC::RomMBC3(item) => item.get(addr),
+            RomMBC::RomNoMBC(item) => item.get(addr),
+        }
+    }
+}
 
 fn main() {
     let args = Args::parse();
@@ -65,9 +84,9 @@ fn main() {
 
     let mbc_type = game_rom[0x0147];
 
-    let mut rom = match mbc_type {
-         0x13 => RomMBC3::new(&game_rom),
-        // 0..=3 => &RomNoMBC { rom: &game_rom },
+    let mut rom: RomMBC = match mbc_type {
+        0x13 => RomMBC::RomMBC3(RomMBC3::new(&game_rom)),
+        0..=3 => RomMBC::RomNoMBC(RomNoMBC{ rom: &game_rom }),
         code => panic!("Unsupported mbc type {:#x}", code),
     };
 

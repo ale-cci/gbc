@@ -294,6 +294,9 @@ impl PPU {
             let h = get_bit(snd, i);
 
             let color = (h << 1) + l;
+            if color == 0 {
+                continue;
+            }
 
             if let Some(color) = self.obj_color(color, palette) {
                 display.set_pixel(x + (7 - i), y, color);
