@@ -59,7 +59,7 @@ impl MMU<'_> {
         let source = (addr as u16) << 8;
         let dest = 0xFE00;
 
-        for i in 0x00..0x9Fu16 {
+        for i in 0x00..=0x9Fu16 {
             let byte = self.get(source + i);
             self.set(dest + i, byte);
         }

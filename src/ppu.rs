@@ -156,7 +156,7 @@ impl PPU {
         let ttr = self.get_tile(tile_id, (self.ly & 0b111) + (self.scy & 0b111));
 
         // rendering background tile
-        self.render_tile(display, rt, ttr, self.x, self.ly);
+        self.render_tile_pixel(display, rt, ttr, self.x, self.ly);
 
         let window_enable = get_bit(self.r_control, 5) == 1;
         let window_visible = (0..=166).contains(&self.wx) && (0..=143).contains(&self.wy);
@@ -167,7 +167,7 @@ impl PPU {
             let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
             let ttr = self.get_tile(tile_id, self.ly);
-            self.render_tile(display, rt, ttr, self.wx + self.x, self.wy);
+            self.render_tile_pixel(display, rt, ttr, self.wx + self.x, self.wy);
         }
 
         let obj_size = get_bit(self.r_control, 2);
@@ -261,7 +261,8 @@ impl PPU {
         return tile_addr(tile, mode_8800) + (intratile * 2);
     }
 
-    fn render_tile(&self, display: &mut Display, rt: &impl Memory, ttr: u16, x: u8, y: u8) {
+    // ttr: tile to render
+    fn render_tile_pixel(&self, display: &mut Display, rt: &impl Memory, ttr: u16, x: u8, y: u8) {
         let fst = rt.get(ttr + 0);
         let snd = rt.get(ttr + 1);
 
