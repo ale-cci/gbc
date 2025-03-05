@@ -1,5 +1,6 @@
 use crate::byteop::*;
 use crate::memory::Memory;
+use crate::registers::{LYC, STAT};
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -19,6 +20,8 @@ pub struct PPU {
     wy: u8,
     bgp: u8,
     sprites: Vec<Sprite>,
+
+    ppu_state: u8,
 
     sprites_line_counter: u8,
     remaining_cycles: u8,
@@ -108,6 +111,8 @@ impl PPU {
             wait: 0,
             bgp: 0,
             sprites,
+
+            ppu_state: 0,
         }
     }
 
@@ -148,72 +153,86 @@ impl PPU {
 
     // render background
     fn render(&mut self, rt: &mut impl Memory, display: &mut Display) {
-        let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
+        if self.ly >= 144 {
+            self.ppu_state = 1;
+        } else if self.ppu_state == 1 && self.ly == 0 {
+            self.ppu_state = 2;
+            self.wait = 80;
+            return;
+        } else {
+            self.ppu_state = 3;
+            let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
 
-        let bg_tilemap = get_bit(self.r_control, 3);
-        let tile_id = rt.get(self.tile_offset(bg_tilemap) + tile_addr);
+            let bg_tilemap = get_bit(self.r_control, 3);
+            let tile_id = rt.get(self.tile_offset(bg_tilemap) + tile_addr);
 
-        let ttr = self.get_tile(tile_id, (self.ly & 0b111) + (self.scy & 0b111));
+            let ttr = self.get_tile(tile_id, (self.ly & 0b111) + (self.scy & 0b111));
 
-        // rendering background tile
-        self.render_tile_pixel(display, rt, ttr, self.x, self.ly);
+            let bg_window_enable_priority = get_bit(self.r_control, 0) == 1;
+            // rendering background tile
+            self.render_tile_pixel(display, rt, ttr, self.x, self.ly);
 
-        let window_enable = get_bit(self.r_control, 5) == 1;
-        let window_visible = (0..=166).contains(&self.wx) && (0..=143).contains(&self.wy);
-        let window_tilemap = get_bit(self.r_control, 6);
+            let window_enable = get_bit(self.r_control, 5) == 1;
+            let window_visible = (0..=166).contains(&self.wx) && (0..=143).contains(&self.wy);
+            let window_tilemap = get_bit(self.r_control, 6);
 
-        if window_enable && window_visible && self.ly == self.wy {
-            let tile_addr = self.x as u16 + self.ly as u16 * 32;
-            let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
+            if window_enable && window_visible && self.ly == self.wy {
+                let tile_addr = self.x as u16 + self.ly as u16 * 32;
+                let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
-            let ttr = self.get_tile(tile_id, self.ly);
-            self.render_tile_pixel(display, rt, ttr, self.wx + self.x, self.wy);
-        }
+                let ttr = self.get_tile(tile_id, self.ly);
+                self.render_tile_pixel(display, rt, ttr, self.wx + self.x, self.wy);
+            }
 
-        let obj_size = get_bit(self.r_control, 2);
+            let obj_size = get_bit(self.r_control, 2);
 
-        if self.sprites_line_counter < 10 {
-            for s in &self.sprites {
-                const DISPLAY_OFFSET: u8 = 8;
-                const SPRITE_WIDTH: u8 = 8;
+            let obj_enable = get_bit(self.r_control, 1) == 1;
 
-                if s.is_visible(self.ly, obj_size) {
-                    let sprite_left = if s.x > DISPLAY_OFFSET {
-                        s.x - DISPLAY_OFFSET
-                    } else {
-                        0
-                    };
-                    let sprite_right = sprite_left + SPRITE_WIDTH;
+            if obj_enable {
+                let mut drawn_sprites_per_line = 0;
+                for s in &self.sprites {
+                    const DISPLAY_OFFSET: u8 = 8;
+                    const SPRITE_WIDTH: u8 = 8;
 
-                    let cx = self.x * 8;
-                    let drawable = sprite_left <= cx && cx <= sprite_right;
-
-                    if drawable {
-                        if sprite_right <= self.x {
-                            self.sprites_line_counter += 1;
-                        }
-                        let obj_tile_line = s.tile_line(rt, self.ly + 16 - s.y);
-
-                        let (start, end) = if sprite_right > cx {
-                            (cx - sprite_left, sprite_right - cx)
-                        } else {
-                            (0, cx - sprite_left)
-                        };
-
-                        self.render_obj_partial(
-                            display,
-                            obj_tile_line,
-                            (start, end),
-                            self.ly,
-                            sprite_left,
-                            s.palette(),
-                        );
+                    if drawn_sprites_per_line == 10 {
+                        // n. of sprites
+                        println!("limit reached");
+                        break;
                     }
-                }
 
-                if self.sprites_line_counter == 10 {
-                    // n. of sprites
-                    break;
+                    if s.is_visible(self.ly, obj_size) {
+                        let sprite_left = if s.x > DISPLAY_OFFSET {
+                            s.x - DISPLAY_OFFSET
+                        } else {
+                            0
+                        };
+                        let sprite_right = sprite_left + SPRITE_WIDTH;
+
+                        let cx = self.x * 8;
+                        let drawable = sprite_left <= cx && cx <= sprite_right;
+
+                        drawn_sprites_per_line += 1;
+
+                        if drawable {
+                            let obj_tile_line = s.tile_line(rt, self.ly + 16 - s.y);
+
+                            let (start, end) = if sprite_right > cx {
+                                (cx - sprite_left, sprite_right - cx)
+                            } else {
+                                (0, cx - sprite_left)
+                            };
+
+                            self.render_obj_partial(
+                                display,
+                                obj_tile_line,
+                                (start, end),
+                                self.ly,
+                                sprite_left,
+                                s.palette(),
+                                s.flags,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -224,9 +243,13 @@ impl PPU {
             self.wait = 456;
             self.ly += 1;
             self.sprites_line_counter = 0;
+            if self.ly < 144 {
+                self.ppu_state = 0;
+            }
 
             let vblank = self.ly >= 144;
             let interrupt_flag = rt.get(0xFF0F);
+
             rt.set(0xFF0F, set_bit(interrupt_flag, 0, vblank));
 
             if self.ly > 153 {
@@ -242,11 +265,30 @@ impl PPU {
                 rt.set(0xFFFF, set_bit(ie, 0, true));
             }
             r_status = set_bit(r_status, 2, true);
+
+            // set ppu status
+            r_status &= 0b11111100;
+            // r_status |= self.ppu_state;
+        } else {
+            r_status = set_bit(r_status, 2, false);
         }
 
+        if get_bit(self.r_status, 5) == 1  && self.ppu_state == 2 {
+            let ie = rt.get(0xFFFF);
+            rt.set(0xFFFF, set_bit(ie, 0, true));
+            r_status |= self.ppu_state;
+        }
+
+        if get_bit(self.r_status, 5) == 1  && self.ppu_state == 1 {
+            let ie = rt.get(0xFFFF);
+            rt.set(0xFFFF, set_bit(ie, 0, true));
+            r_status |= self.ppu_state;
+        }
+
+
         // r_status 1-0: ppu mode
-        rt.set(0xFF41, r_status);
-        rt.set(0xFF44, self.ly);
+        rt.set(STAT, r_status); // stat register
+        rt.set(LYC, self.ly); // current horizontal line
     }
 
     fn tile_offset(&self, id: u8) -> u16 {
@@ -286,9 +328,14 @@ impl PPU {
         y: u8,
         x: u8,
         palette: u8,
+        flags: u8,
     ) {
         let (fst, snd) = tile;
         let (t_start, t_end) = slice;
+
+        let is_flipped_x = get_bit(flags, 5) == 1;
+        let is_flipped_y = get_bit(flags, 6) == 1;
+        let priority = get_bit(flags, 7);
 
         for i in t_start..t_end {
             let l = get_bit(fst, i);
@@ -300,7 +347,8 @@ impl PPU {
             }
 
             if let Some(color) = self.obj_color(color, palette) {
-                display.set_pixel(x + (7 - i), y, color);
+                let delta = if is_flipped_x { i } else { 7 - i };
+                display.set_pixel(x + delta, y, color);
             }
         }
     }

@@ -399,6 +399,7 @@ impl Runtime<'_> {
 
     pub fn tick_timer(&mut self, ticks: u8) {
         self.timer.tick(&mut self.memory, ticks);
+        self.memory.tick(ticks / 4);
     }
     fn next_opcode(&mut self) -> u8 {
         let opcode = self.get(self.cpu.pc);

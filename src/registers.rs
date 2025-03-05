@@ -40,3 +40,5 @@ pub const LCDC: u16 = 0xFF40;
 pub const IE : u16 = 0xFFFF;
 pub const IF : u16 = 0xFF0F;
 
+pub const STAT: u16 = 0xFF41;
+pub const LYC: u16 = 0xFF44;

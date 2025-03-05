@@ -29,6 +29,7 @@ pub struct MMU<'a> {
     hwcfg: u8,
 
     inputs: u8,
+    dma_ticks: u8,
 }
 
 impl MMU<'_> {
@@ -42,6 +43,7 @@ impl MMU<'_> {
             vram: vec![0; 0x9fff - 0x8000 + 1],
             wram: vec![0; 0xffff - 0x8000 + 1],
             inputs: 0xFF,
+            dma_ticks: 0,
         }
     }
 
@@ -63,6 +65,11 @@ impl MMU<'_> {
             let byte = self.get(source + i);
             self.set(dest + i, byte);
         }
+        self.dma_ticks = 160;
+    }
+
+    pub fn tick(&mut self, ticks: u8) {
+        self.dma_ticks -= ticks;
     }
 }
 
