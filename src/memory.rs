@@ -142,6 +142,7 @@ impl Memory for MMU<'_> {
                 self.hwset(addr, 0);
             }
             0xFF46 => {
+                self.wram[(addr - 0xA000) as usize] = val;
                 self.dma(val);
             }
             0xA000..=0xBFFF => self.rom.set(addr, val),
