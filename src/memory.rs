@@ -69,7 +69,11 @@ impl MMU<'_> {
     }
 
     pub fn tick(&mut self, ticks: u8) {
-        self.dma_ticks -= ticks;
+        if self.dma_ticks > ticks {
+            self.dma_ticks -= ticks;
+        } else {
+            self.dma_ticks = 0;
+        }
     }
 }
 
@@ -133,6 +137,9 @@ impl Memory for MMU<'_> {
             0xFF00 => {
                 let read_mask = (val & 0x30) + 0x60;
                 self.wram[addr as usize - 0xA000] = read_mask;
+            }
+            0xFF01 => {
+                print!("{}", val as char);
             }
             0xFF26 => {
                 // only the first bit of this register can be set by games,

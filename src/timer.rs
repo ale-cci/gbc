@@ -1,4 +1,5 @@
 use crate::byteop::*;
+use crate::registers;
 use crate::memory::Memory;
 
 pub struct Timer {
@@ -6,12 +7,6 @@ pub struct Timer {
 
     pub delta_div: u8,
 }
-
-const INT_ADDR: u16 = 0xFF0F;
-const TIMA_ADDR: u16 = 0xFF05;
-const TMA_ADDR: u16 = 0xFF06;
-const DIV_ADDR: u16 = 0xFF04;
-const TAC_ADDR: u16 = 0xFF07;
 
 impl Timer {
     pub fn new() -> Timer {
@@ -25,7 +20,7 @@ impl Timer {
         let internal_ticks = self.internal_ticks;
         self.internal_ticks = self.internal_ticks.wrapping_add(ticks as u16);
 
-        let div = mem.get(DIV_ADDR);
+        let div = mem.get(registers::DIV);
 
         let timer_incr = timer_increment(internal_ticks, ticks, 3);
 
@@ -34,11 +29,11 @@ impl Timer {
 
         let div = div.wrapping_add(timer_incr);
 
-        mem.hwset(DIV_ADDR, div as u8);
+        mem.hwset(registers::DIV, div as u8);
 
-        let tima = mem.get(TIMA_ADDR);
-        let tma = mem.get(TMA_ADDR);
-        let tac = mem.get(TAC_ADDR);
+        let tima = mem.get(registers::TIMA);
+        let tma = mem.get(registers::TMA);
+        let tac = mem.get(registers::TAC);
 
         let timer_speed = tac & 0b11;
 
@@ -47,15 +42,15 @@ impl Timer {
             let interrupt = (tima as u16 + incr as u16) > 0xFF;
 
             let tima = if interrupt {
-                let int_flag = mem.get(INT_ADDR) | 0b100;
-                mem.set(INT_ADDR, int_flag);
+                let int_flag = mem.get(registers::IF) | 0b100;
+                mem.set(registers::IF, int_flag);
 
                 tma + ((incr - (0xFF - tima + 1)) & (0xFF - tma))
             } else {
                 tima + incr
             };
 
-            mem.set(TIMA_ADDR, tima);
+            mem.set(registers::TIMA, tima);
         }
     }
 }
@@ -108,34 +103,34 @@ mod tests {
         let mut mem = Mem::new();
 
         timer.tick(&mut mem, 255);
-        assert_eq!(mem.get(DIV_ADDR), 0);
+        assert_eq!(mem.get(registers::DIV), 0);
 
         timer.tick(&mut mem, 1);
-        assert_eq!(mem.get(DIV_ADDR), 1);
+        assert_eq!(mem.get(registers::DIV), 1);
     }
 
     #[test]
     fn test_invokes_interrupt() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b111);
+        mem.set(registers::TAC, 0b111);
 
         timer.tick(&mut mem, 255);
-        assert_eq!(mem.get(DIV_ADDR), 0);
+        assert_eq!(mem.get(registers::DIV), 0);
 
         timer.tick(&mut mem, 1);
-        assert_eq!(mem.get(DIV_ADDR), 1);
+        assert_eq!(mem.get(registers::DIV), 1);
     }
 
     #[test]
     fn test_does_not_increment_tima_if_tac_enable_is_0() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b011);
+        mem.set(registers::TAC, 0b011);
         timer.tick(&mut mem, 255);
         timer.tick(&mut mem, 1);
 
-        let tima = mem.get(TIMA_ADDR);
+        let tima = mem.get(registers::TIMA);
         assert_eq!(tima, 0);
     }
 
@@ -143,11 +138,11 @@ mod tests {
     fn test_does_increment_tima_if_tac_enable_is_1() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b111);
+        mem.set(registers::TAC, 0b111);
         timer.tick(&mut mem, 255);
         timer.tick(&mut mem, 1);
 
-        let tima = mem.get(TIMA_ADDR);
+        let tima = mem.get(registers::TIMA);
         assert_eq!(tima, 1);
     }
 
@@ -155,14 +150,14 @@ mod tests {
     fn test_tima_restarts_from_tma() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b111);
-        mem.set(TIMA_ADDR, 0xFF);
-        mem.set(TMA_ADDR, 0xFE);
+        mem.set(registers::TAC, 0b111);
+        mem.set(registers::TIMA, 0xFF);
+        mem.set(registers::TMA, 0xFE);
 
         timer.tick(&mut mem, 255);
         timer.tick(&mut mem, 1);
 
-        let tima = mem.get(TIMA_ADDR);
+        let tima = mem.get(registers::TIMA);
         assert_eq!(tima, 0xFE);
     }
 
@@ -170,14 +165,14 @@ mod tests {
     fn test_tima_restarts_from_tma_f0() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b111);
-        mem.set(TIMA_ADDR, 0xFF);
-        mem.set(TMA_ADDR, 0xF0);
+        mem.set(registers::TAC, 0b111);
+        mem.set(registers::TIMA, 0xFF);
+        mem.set(registers::TMA, 0xF0);
 
         timer.tick(&mut mem, 255);
         timer.tick(&mut mem, 1);
 
-        let tima = mem.get(TIMA_ADDR);
+        let tima = mem.get(registers::TIMA);
         assert_eq!(tima, 0xF0);
     }
 
@@ -185,9 +180,9 @@ mod tests {
     fn test_tima() {
         let mut timer = Timer::new();
         let mut mem = Mem::new();
-        mem.set(TAC_ADDR, 0b101);
-        mem.set(TIMA_ADDR, 0);
-        mem.set(INT_ADDR, 0);
+        mem.set(registers::TAC, 0b101);
+        mem.set(registers::TIMA, 0);
+        mem.set(registers::IF, 0);
 
         for _ in 0..4 {
             timer.tick(&mut mem, 250);

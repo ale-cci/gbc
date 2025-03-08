@@ -1,4 +1,4 @@
-use crate::byteop::*;
+use crate::{byteop::*, registers};
 use crate::mbc::Rom;
 use crate::memory::{HWInput, Memory, MMU};
 use crate::registers::IF;
@@ -63,6 +63,24 @@ impl CpuRegisters {
             sp: 0,
             ime: false,
             debug: false,
+            halt: false,
+        }
+    }
+
+    fn atboot() -> CpuRegisters {
+        CpuRegisters {
+            ra: 0x01,
+            rf: 0b10110000,
+            rb: 0x00,
+            rc: 0x13,
+            rd: 0x00,
+            re: 0xD8,
+            rh: 0x01,
+            rl: 0x4D,
+            pc: 0x0100,
+            sp: 0xFFFE,
+            ime: false,
+            debug: true,
             halt: false,
         }
     }
@@ -397,6 +415,19 @@ impl Runtime<'_> {
         return rt;
     }
 
+    pub fn noboot<'a>(bootstrap: &'a Vec<u8>, rom: &'a mut dyn Rom<'a>) -> Runtime<'a> {
+        let mut rt = Runtime {
+            cpu: CpuRegisters::atboot(),
+            memory: MMU::new(&bootstrap, rom),
+            timer: Timer::new(),
+        };
+
+        rt.memory.set(0xFF50, 1);
+
+        // https://b13rg.github.io/Gameboy-MBC-Analysis/#cart-1
+        return rt;
+    }
+
     pub fn tick_timer(&mut self, ticks: u8) {
         self.timer.tick(&mut self.memory, ticks);
         self.memory.tick(ticks / 4);
@@ -415,10 +446,10 @@ impl Runtime<'_> {
     }
 
     pub fn tick(&mut self) -> u8 {
-        let interrupts = self.get(0xFFFF) & self.get(0xFF0F);
-
+        let interrupts = self.get(registers::IE) & self.get(registers::IF);
         if self.cpu.halt {
             if interrupts == 0 {
+                // println!("wait for interrupt! {:b}", self.get(registers::IE));
                 return 1;
             } else {
                 self.cpu.halt = false;
@@ -433,7 +464,7 @@ impl Runtime<'_> {
             // priority goes from lsb to msb
             if get_bit(interrupts, 0) == 1 {
                 self.cpu.pc = 0x40;
-                self.set(0xFF0F, set_bit(interrupt_flag, 0, false));
+                self.set(IF, set_bit(interrupt_flag, 0, false));
             } else if get_bit(interrupts, 1) == 1 {
                 self.cpu.pc = 0x48;
                 self.set(IF, set_bit(interrupt_flag, 1, false));
@@ -449,7 +480,7 @@ impl Runtime<'_> {
             }
         }
 
-        if self.cpu.debug && self.boot_rom_disabled() {
+        if self.cpu.debug {
             println!(
                 "{:?} PCMEM:{},{},{},{}",
                 self.cpu,

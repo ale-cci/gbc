@@ -1,6 +1,6 @@
 use crate::byteop::*;
 use crate::memory::Memory;
-use crate::registers::{LYC, STAT};
+use crate::registers;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::Canvas;
@@ -23,9 +23,8 @@ pub struct PPU {
 
     ppu_state: u8,
 
-    sprites_line_counter: u8,
-    remaining_cycles: u8,
     wait: u16,
+    waited: u16,
 }
 struct Sprite {
     addr: u16,
@@ -58,7 +57,7 @@ impl Sprite {
         return s;
     }
 
-    fn update(&mut self, rt: &impl Memory) {
+    fn load(&mut self, rt: &impl Memory) {
         self.y = rt.get(self.addr + 0);
         self.x = rt.get(self.addr + 1);
         self.tile = rt.get(self.addr + 2);
@@ -106,61 +105,98 @@ impl PPU {
             obp1: 0,
             wx: 0,
             wy: 0,
-            sprites_line_counter: 0,
-            remaining_cycles: 0,
             wait: 0,
             bgp: 0,
             sprites,
 
-            ppu_state: 0,
+            ppu_state: 1,
+            waited: 0,
         }
     }
 
     fn get_color(&self, id: u8, palette: u8) -> u8 {
         let shift = id * 2;
+        // FIXME: use palette
         let color = (self.bgp & (0b11 << shift)) >> shift;
 
         return color;
     }
 
-    pub fn update(&mut self, rt: &mut impl Memory, cc: u8, display: &mut Display) {
-        self.r_control = rt.get(0xFF40);
-        self.r_status = rt.get(0xFF41);
-        self.scy = rt.get(0xFF42);
-        self.scx = rt.get(0xFF43);
-        self.ly = rt.get(0xFF44);
-        self.lyc = rt.get(0xFF45); // 0..=153
-        self.bgp = rt.get(0xFF47);
-        self.obp0 = rt.get(0xFF48);
-        self.obp1 = rt.get(0xFF49);
-        self.wy = rt.get(0xFF4A);
-        self.wx = rt.get(0xFF4B);
+    pub fn update(&mut self, rt: &mut impl Memory, dots: u8, display: &mut Display) {
+        self.r_control = rt.get(registers::LCDC);
+        self.r_status = rt.get(registers::STAT);
+        self.scy = rt.get(registers::SCY);
+        self.scx = rt.get(registers::SCX);
+        self.ly = rt.get(registers::LY);
+        self.lyc = rt.get(registers::LYC); // 0..=153
+        self.bgp = rt.get(registers::BGP);
+        self.obp0 = rt.get(registers::OBP0);
+        self.obp1 = rt.get(registers::OBP1);
+        self.wy = rt.get(registers::WY);
+        self.wx = rt.get(registers::WX);
+        let mut dots: u16 = dots.into();
 
-        let cc = cc as u16 * 4;
-        if self.wait <= cc {
-            self.wait = 0;
-        } else if self.wait > 0 {
-            self.wait -= cc;
-        }
-
-        if self.wait == 0 {
+        // mode 2. OAM scan, read values from RAM
+        if self.ppu_state == 2 {
             for s in &mut self.sprites {
-                s.update(rt);
+                s.load(rt);
             }
-            self.render(rt, display);
         }
+
+        while dots > 0 {
+            if self.wait > 0 {
+                if self.wait >= dots {
+                    self.wait -= dots;
+                    dots = 0;
+
+                } else {
+                    dots -= self.wait;
+                    self.wait = 0;
+                }
+            } else {
+                self.render(rt, display);
+            }
+        }
+        self.update_registers(rt);
+
+        assert!(rt.get(registers::IF) & 0b1 == (self.ly >= 144) as u8);
     }
 
-    // render background
     fn render(&mut self, rt: &mut impl Memory, display: &mut Display) {
-        if self.ly >= 144 {
-            self.ppu_state = 1;
-        } else if self.ppu_state == 1 && self.ly == 0 {
-            self.ppu_state = 2;
-            self.wait = 80;
+        assert!(self.ly < 154);
+        if self.ppu_state == 1 {
+            if self.ly == 0 || self.ly == 153 {
+                self.ly = 0;
+                // enter mode 2, start waiting 80 dots.
+                self.ppu_state = 2;
+                self.wait = 80;
+                assert!(self.waited == 0);
+                self.waited += 80;
+
+            } else if self.ly >= 144 {
+                // VBLANK
+                self.wait = 456;
+                self.ly += 1;
+            } else {
+                panic!("Impossible, PPU on mode 1 when ly is {}", self.ly);
+            }
             return;
-        } else {
+        } else if self.ppu_state == 2 {
+            // 80 dots just waited, starting mode 3.
+            // enter mode 3
+            if self.waited != 80 {
+                panic!("Self waited is not 80: {}", self.waited);
+            }
+            assert!(self.waited == 80);
+            self.wait = 12;
+            self.waited += 12;
             self.ppu_state = 3;
+            return;
+        } else if self.ppu_state == 3 {
+            assert!(self.ly <= 144);
+            // 12 dots waited, start drawing a pixel for dot.
+            self.wait = 8;
+            self.waited += 8;
             let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
 
             let bg_tilemap = get_bit(self.r_control, 3);
@@ -196,7 +232,6 @@ impl PPU {
 
                     if drawn_sprites_per_line == 10 {
                         // n. of sprites
-                        println!("limit reached");
                         break;
                     }
 
@@ -235,60 +270,68 @@ impl PPU {
                     }
                 }
             }
-        }
 
-        self.x += 1;
-        if self.x == 20 {
-            self.x = 0; // hblank
-            self.wait = 456;
-            self.ly += 1;
-            self.sprites_line_counter = 0;
-            if self.ly < 144 {
+            self.x += 1;
+            if self.x == 20 {
+                // enter HBLANK
+                assert!(self.waited >= 80 + 172 && self.waited <= 80 + 289);
+                self.wait = 456 - self.waited;
+                assert!(self.wait >= 87 && self.wait <= 204);
+                self.waited = 0;
                 self.ppu_state = 0;
             }
+        } else if self.ppu_state == 0 {
+            assert!(self.waited == 0);
+            self.ly += 1;
+            self.x = 0;
+            if self.ly >= 144 {
+                self.ppu_state = 1;
+                self.wait = 456;
 
-            let vblank = self.ly >= 144;
-            let interrupt_flag = rt.get(0xFF0F);
-
-            rt.set(0xFF0F, set_bit(interrupt_flag, 0, vblank));
-
-            if self.ly > 153 {
-                self.ly = 0;
+            } else {
+                self.wait = 80;
+                self.waited += 80;
+                self.ppu_state = 2;
             }
         }
+    }
 
+    fn update_registers(&mut self, rt: &mut impl Memory) {
         let mut r_status = self.r_status;
-        if self.ly == self.lyc {
-            if get_bit(self.r_status, 6) == 1 {
-                // LYC int select Trigger interrupt if
-                let ie = rt.get(0xFFFF);
-                rt.set(0xFFFF, set_bit(ie, 0, true));
-            }
-            r_status = set_bit(r_status, 2, true);
 
-            // set ppu status
-            r_status &= 0b11111100;
-            // r_status |= self.ppu_state;
-        } else {
-            r_status = set_bit(r_status, 2, false);
+        // setting the interrupt flags
+        let mut reg_if = rt.get(registers::IF);
+
+        reg_if = set_bit(reg_if, 0, self.ppu_state == 1);
+        reg_if = set_bit(reg_if, 1, self.ly == self.lyc);
+
+        // https://gbdev.io/pandocs/STAT.html#ff41--stat-lcd-status
+        let mut stat_int = false;
+        if get_bit(r_status, 3) == 1 && self.ppu_state == 0 {
+            stat_int |= true;
         }
 
-        if get_bit(self.r_status, 5) == 1  && self.ppu_state == 2 {
-            let ie = rt.get(0xFFFF);
-            rt.set(0xFFFF, set_bit(ie, 0, true));
-            r_status |= self.ppu_state;
+        if get_bit(r_status, 4) == 1 && self.ppu_state == 1 {
+            stat_int |= true;
         }
 
-        if get_bit(self.r_status, 5) == 1  && self.ppu_state == 1 {
-            let ie = rt.get(0xFFFF);
-            rt.set(0xFFFF, set_bit(ie, 0, true));
-            r_status |= self.ppu_state;
+        if get_bit(r_status, 5) == 1 && self.ppu_state == 2 {
+            stat_int |= true;
         }
 
+        if get_bit(r_status, 6) == 1 && self.ly == self.lyc {
+            stat_int |= true;
+        }
 
-        // r_status 1-0: ppu mode
-        rt.set(STAT, r_status); // stat register
-        rt.set(LYC, self.ly); // current horizontal line
+        r_status = set_bit(r_status, 2, self.ly == self.lyc);
+        r_status &= 0b11111100;
+        r_status |= self.ppu_state;
+
+        reg_if = set_bit(reg_if, 1, stat_int);
+
+        rt.set(registers::IF, reg_if);
+        rt.set(registers::STAT, r_status); // stat register
+        rt.set(registers::LY, self.ly); // current horizontal line
     }
 
     fn tile_offset(&self, id: u8) -> u16 {

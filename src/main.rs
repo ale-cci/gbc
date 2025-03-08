@@ -156,11 +156,11 @@ fn main() {
             }
         }
 
-        let ticks = (tick.elapsed().as_nanos() / clock_target) / (4 * speed);
+        let ticks = (tick.elapsed().as_nanos() / clock_target) / (speed * 4);
         for _ in 0..ticks {
             let cc = rt.tick();
             rt.tick_timer(cc * 4);
-            ppu.update(&mut rt, cc, &mut display);
+            ppu.update(&mut rt, cc * 4, &mut display);
             apu.update(cc * 4, &mut rt);
         }
         if ticks > 0 {
