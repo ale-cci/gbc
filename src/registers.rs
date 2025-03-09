@@ -33,12 +33,12 @@ pub const NR51: u16 = 0xFF25; // sound panning
 pub const NR52: u16 = 0xFF26; // audio master control
 
 // LCD control
-pub const LCDC: u16 = 0xFF40;
 
 // interupts
 pub const IE: u16 = 0xFFFF;
 pub const IF: u16 = 0xFF0F;
 
+pub const LCDC: u16 = 0xFF40;
 pub const STAT: u16 = 0xFF41;
 pub const SCY: u16 = 0xFF42;
 pub const SCX: u16 = 0xFF43;
