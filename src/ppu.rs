@@ -30,7 +30,6 @@ pub struct PPU {
     filtered_sprites: Vec<Sprite>,
 
     pixel_fifo_bg: VecDeque<FIFOPixel>,
-    pixel_fifo_win: VecDeque<FIFOPixel>,
 
 }
 
@@ -137,7 +136,6 @@ impl PPU {
             filtered_sprites: Vec::with_capacity(10),
 
             pixel_fifo_bg: VecDeque::with_capacity(16),
-            pixel_fifo_win: VecDeque::with_capacity(16),
         }
     }
 
@@ -233,21 +231,21 @@ impl PPU {
                         self.filtered_sprites.push(s.clone());
                     }
                 }
-
+                self.wait = 10 * self.filtered_sprites.len() as u16;
+                self.waited += self.wait;
             }
             assert!(self.ly <= 144);
 
             // 12 dots waited, start drawing a pixel for dot.
 
-            let bg_window_enable_priority = get_bit(self.r_control, 0) == 1;
-            self.wait = 8;
+            self.wait += 8;
             self.waited += 8;
 
-            // self.fetch_pixels(rt);
-            // self.draw_pixels(display);
+            self.fetch_pixels(rt);
+            self.draw_pixels(display);
             // if bg_window_enable_priority {
-                 self.render_bg(rt, display);
-                 self.render_objects(rt, display);
+            //     self.render_bg(rt, display);
+            //     self.render_objects(rt, display);
             // } else {
             //     self.render_bg(rt, display);
             //     self.render_objects(rt, display);
@@ -378,104 +376,74 @@ impl PPU {
 
 
     fn fetch_pixels(&mut self, rt: &mut impl Memory) {
-        let window_enable = get_bit(self.r_control, 5) == 1;
+        let window_enable = get_bit(self.r_control, 5) == 1 && self.ly >= self.wy;
 
-        let wx = self.wx - 7;
+        let ttr = self.bg_tile_addr(rt, self.x);
+        let ttr_next = self.bg_tile_addr(rt, self.x + 1);
 
-        let window_visible = window_enable && self.x * 8 + 8 > wx && self.ly >= self.wy ;
-        let drawing_window = window_enable && self.x * 8 > wx && self.ly >= self.wy ;
+        let bg_fst: u16 = ((rt.get(ttr + 0) as u16) << 8) + rt.get(ttr_next + 0) as u16;
+        let bg_snd: u16 = ((rt.get(ttr + 1) as u16) << 8) + rt.get(ttr_next + 1) as u16;
 
-        if !drawing_window {
-            // *** LOAD BACKGROUND PIXELS ***
-            let ttr = self.bg_tile_addr(rt, self.x);
+        let ttr = self.win_tile_addr(rt, self.x);
+        let ttr_next = self.win_tile_addr(rt, self.x + 1);
+        let win_fst: u16 = ((rt.get(ttr + 0) as u16) << 8) + rt.get(ttr_next + 0) as u16;
+        let win_snd: u16 = ((rt.get(ttr + 1) as u16) << 8) + rt.get(ttr_next + 1) as u16;
 
-            let fst = rt.get(ttr + 0);
-            let snd = rt.get(ttr + 1);
 
-            for i in 0..8 {
-                let l = get_bit(fst, 7 - i);
-                let h = get_bit(snd, 7 - i);
+        for i in 0..8 {
+            let current_x = self.x * 8 + i;
+            let px = if window_enable && current_x >= self.wx - 7 {
+                let l : u8 = get_bit(win_fst, 15 - i);
+                let h : u8 = get_bit(win_snd, 15 - i);
                 let color = (h << 1) + l;
 
-                self.pixel_fifo_bg.push_back(
-                    FIFOPixel{
-                        source: FIFOPixelSource::BACKGROUND,
-                        color_id: color,
-                    },
-                )
-            }
-
-            let to_discard = self.scx & 0b111;
-            for _ in 0..to_discard {
-                self.pixel_fifo_bg.pop_front();
-            }
-
-            let ttr = self.bg_tile_addr(rt, self.x + 1);
-            let fst = rt.get(ttr + 0);
-            let snd = rt.get(ttr + 1);
-
-            for i in 0..to_discard {
-                let l = get_bit(fst, 7 - i);
-                let h = get_bit(snd, 7 - i);
+                FIFOPixel{
+                    source: FIFOPixelSource::BACKGROUND,
+                    color_id: color,
+                }
+            } else {
+                // TODO: shift register SCX
+                let l = get_bit(bg_fst, 15 - (i + (self.scx & 0b111)));
+                let h = get_bit(bg_snd, 15 - (i + (self.scx & 0b111)));
                 let color = (h << 1) + l;
 
-                self.pixel_fifo_bg.push_back(
-                    FIFOPixel{
-                        source: FIFOPixelSource::BACKGROUND,
-                        color_id: color,
-                    }
-                )
+                FIFOPixel{
+                    source: FIFOPixelSource::BACKGROUND,
+                    color_id: color,
+                }
+            };
+
+            for s in &self.filtered_sprites {
+                if s.x == current_x {
+
+                }
             }
+
+            self.pixel_fifo_bg.push_back(px);
         }
 
-        // *** LOAD WINDOW ***
-        let window_tilemap = get_bit(self.r_control, 6);
-        if window_visible {
-            let tile_addr = get_tile_addr(
-                self.x - wx / 8,
-                0,
-                self.ly - self.wy,
-                0,
-            );
 
-            let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
-            let ttr = self.get_tile(tile_id, self.ly - self.wy);
-
-            let fst = rt.get(ttr + 0);
-            let snd = rt.get(ttr + 1);
-
+        for s in &self.filtered_sprites {
             for i in 0..8 {
-                let l = get_bit(fst, 7-i);
-                let h = get_bit(snd, 7-i);
-                let color = (h << 1) + l;
-                self.pixel_fifo_win.push_back(FIFOPixel{
-                    source: FIFOPixelSource::WINDOW,
-                    color_id: color,
-                })
+                let current_x = self.x * 8 + i;
+                if s.x - 8 >= current_x && current_x <= s.x {
+
+                }
             }
         }
     }
 
     fn draw_pixels(&mut self, display: &mut Display) {
-        if self.x == 0 {
-            let to_pop = self.scx & 0b111;
-            for _ in 0..to_pop {
-                self.pixel_fifo_bg.pop_front();
-            }
-        }
         for idx in 0..8 {
-            let px: FIFOPixel = if self.x * 8 + idx >= self.wx {
-                self.pixel_fifo_bg.clear();
-                self.pixel_fifo_win.pop_front().unwrap()
-            } else {
-                self.pixel_fifo_bg.pop_front().unwrap()
-            };
+            let px = self.pixel_fifo_bg.pop_front().unwrap();
 
             let color = match px.source {
                 FIFOPixelSource::BACKGROUND => self.get_color(px.color_id, self.bgp),
                 FIFOPixelSource::WINDOW => self.get_color(px.color_id, self.bgp),
                 _ => panic!("not implemented"),
             };
+
+
             display.set_pixel(self.x * 8 + idx, self.ly, color);
         }
     }
@@ -533,6 +501,21 @@ impl PPU {
         let ttr = self.get_tile(tile_id, (self.ly & 0b111) + (self.scy & 0b111));
         return ttr;
     }
+
+    fn win_tile_addr(&self, rt: &impl Memory, x: u8) -> u16 {
+        let window_tilemap = get_bit(self.r_control, 6);
+
+        let tile_addr = get_tile_addr(
+            x - (self.wx - 7)/ 8,
+            0,
+            self.ly - self.wy,
+            0,
+        );
+        let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
+        let ttr = self.get_tile(tile_id, self.ly - self.wy);
+        return ttr;
+    }
+
     fn render_obj_partial(
         &self,
         display: &mut Display,
