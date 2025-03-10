@@ -3,9 +3,9 @@ use crate::memory::Memory;
 use crate::registers;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
+use sdl2::render::Canvas;
 use std::collections::VecDeque;
 use std::option::Option;
-use sdl2::render::Canvas;
 
 pub struct PPU {
     x: u8,
@@ -30,7 +30,6 @@ pub struct PPU {
     filtered_sprites: Vec<Sprite>,
 
     pixel_fifo_bg: VecDeque<FIFOPixel>,
-
 }
 
 #[derive(Copy, Clone)]
@@ -159,12 +158,12 @@ impl PPU {
         self.wx = rt.get(registers::WX);
         let mut dots: u16 = dots.into();
 
-//        // mode 2. OAM scan, read values from RAM
-//        if self.ppu_state == 2 {
-//            for s in &mut self.sprites {
-//                s.load(rt);
-//            }
-//        }
+        //        // mode 2. OAM scan, read values from RAM
+        //        if self.ppu_state == 2 {
+        //            for s in &mut self.sprites {
+        //                s.load(rt);
+        //            }
+        //        }
 
         while dots > 0 {
             if self.wait > 0 {
@@ -326,7 +325,15 @@ impl PPU {
     }
 
     // ttr: tile to render
-    fn render_tile_pixel(&self, display: &mut Display, rt: &impl Memory, ttr: u16, x: u8, y: u8, scx: u8) {
+    fn render_tile_pixel(
+        &self,
+        display: &mut Display,
+        rt: &impl Memory,
+        ttr: u16,
+        x: u8,
+        y: u8,
+        scx: u8,
+    ) {
         let fst = rt.get(ttr + 0);
         let snd = rt.get(ttr + 1);
 
@@ -341,7 +348,6 @@ impl PPU {
             display.set_pixel(x + (scx & 0b111), y, self.get_color(color, self.bgp));
         }
     }
-
 
     fn render_bg(&mut self, rt: &mut impl Memory, display: &mut Display) {
         let tile_addr = get_tile_addr(self.x, self.scx, self.ly, self.scy);
@@ -359,12 +365,7 @@ impl PPU {
         let window_tilemap = get_bit(self.r_control, 6);
 
         if window_enable && window_visible && self.ly >= self.wy && self.x * 8 >= self.wx - 7 {
-            let tile_addr = get_tile_addr(
-                self.x - (self.wx - 7)/ 8,
-                0,
-                self.ly - self.wy,
-                0,
-            );
+            let tile_addr = get_tile_addr(self.x - (self.wx - 7) / 8, 0, self.ly - self.wy, 0);
 
             let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
 
@@ -373,7 +374,6 @@ impl PPU {
             self.render_tile_pixel(display, rt, ttr, self.x, self.ly, scx);
         }
     }
-
 
     fn fetch_pixels(&mut self, rt: &mut impl Memory) {
         let window_enable = get_bit(self.r_control, 5) == 1 && self.ly >= self.wy;
@@ -386,18 +386,18 @@ impl PPU {
 
         let ttr = self.win_tile_addr(rt, self.x);
         let ttr_next = self.win_tile_addr(rt, self.x + 1);
+
         let win_fst: u16 = ((rt.get(ttr + 0) as u16) << 8) + rt.get(ttr_next + 0) as u16;
         let win_snd: u16 = ((rt.get(ttr + 1) as u16) << 8) + rt.get(ttr_next + 1) as u16;
-
 
         for i in 0..8 {
             let current_x = self.x * 8 + i;
             let px = if window_enable && current_x >= self.wx - 7 {
-                let l : u8 = get_bit(win_fst, 15 - i);
-                let h : u8 = get_bit(win_snd, 15 - i);
+                let l: u8 = get_bit(win_fst, 15 - i);
+                let h: u8 = get_bit(win_snd, 15 - i);
                 let color = (h << 1) + l;
 
-                FIFOPixel{
+                FIFOPixel {
                     source: FIFOPixelSource::BACKGROUND,
                     color_id: color,
                 }
@@ -407,27 +407,62 @@ impl PPU {
                 let h = get_bit(bg_snd, 15 - (i + (self.scx & 0b111)));
                 let color = (h << 1) + l;
 
-                FIFOPixel{
+                FIFOPixel {
                     source: FIFOPixelSource::BACKGROUND,
                     color_id: color,
                 }
             };
 
             for s in &self.filtered_sprites {
-                if s.x == current_x {
-
-                }
+                if s.x == current_x {}
             }
 
             self.pixel_fifo_bg.push_back(px);
         }
 
+        let obj_enable = get_bit(self.r_control, 1) == 1;
+        if !obj_enable {
+            return;
+        }
 
-        for s in &self.filtered_sprites {
-            for i in 0..8 {
-                let current_x = self.x * 8 + i;
-                if s.x - 8 >= current_x && current_x <= s.x {
+        for i in 0..8 {
+            let current_x = (self.x * 8 + i) as i16;
+            if let FIFOPixelSource::SPRITE(_) = self.pixel_fifo_bg[i as usize].source {
+                continue;
+            }
 
+            for s in &self.filtered_sprites {
+                let left = s.x as i16 - 8;
+                let right = left + 8;
+
+                if left <= current_x && current_x < right {
+                    // i should draw this
+
+                    let is_flipped_y = get_bit(s.flags, 6) == 1;
+                    let is_flipped_x = get_bit(s.flags, 5) == 1;
+                    let priority = get_bit(s.flags, 7);
+
+                    let (fst, snd) =
+                        s.tile_line(rt, self.ly + if is_flipped_y { s.y } else { 16 - s.y });
+
+                    let idx = (current_x - left) as u8;
+
+                    let idx = if is_flipped_x { idx } else { 7 - idx };
+
+                    let l = get_bit(fst, idx);
+                    let h = get_bit(snd, idx);
+                    let color = (h << 1) + l;
+
+                    if color == 0 {
+                        continue;
+                    }
+
+                    if priority == 0 || self.pixel_fifo_bg[i as usize].color_id == 0 {
+                        self.pixel_fifo_bg[i as usize] = FIFOPixel {
+                            source: FIFOPixelSource::SPRITE(*s),
+                            color_id: color,
+                        };
+                    }
                 }
             }
         }
@@ -440,9 +475,8 @@ impl PPU {
             let color = match px.source {
                 FIFOPixelSource::BACKGROUND => self.get_color(px.color_id, self.bgp),
                 FIFOPixelSource::WINDOW => self.get_color(px.color_id, self.bgp),
-                _ => panic!("not implemented"),
+                FIFOPixelSource::SPRITE(s) => self.obj_color(px.color_id, s.palette()).unwrap(),
             };
-
 
             display.set_pixel(self.x * 8 + idx, self.ly, color);
         }
@@ -458,7 +492,6 @@ impl PPU {
             const DISPLAY_OFFSET: u8 = 8;
             const SPRITE_WIDTH: u8 = 8;
 
-
             let sprite_left = if s.x > DISPLAY_OFFSET {
                 s.x - DISPLAY_OFFSET
             } else {
@@ -468,7 +501,6 @@ impl PPU {
 
             let cx = self.x * 8;
             let drawable = sprite_left <= cx && cx <= sprite_right;
-
 
             if drawable {
                 let obj_tile_line = s.tile_line(rt, self.ly + 16 - s.y);
@@ -503,14 +535,15 @@ impl PPU {
     }
 
     fn win_tile_addr(&self, rt: &impl Memory, x: u8) -> u16 {
+        if self.ly < self.wy {
+            return 0;
+        }
         let window_tilemap = get_bit(self.r_control, 6);
 
-        let tile_addr = get_tile_addr(
-            x - (self.wx - 7)/ 8,
-            0,
-            self.ly - self.wy,
-            0,
-        );
+        let addr = x as i16 - (self.wx as i16 - 7) / 8;
+        let addr = if addr < 0 { 0 } else { addr };
+
+        let tile_addr = get_tile_addr(addr as u8, 0, self.ly - self.wy, 0);
         let tile_id = rt.get(self.tile_offset(window_tilemap) + tile_addr);
         let ttr = self.get_tile(tile_id, self.ly - self.wy);
         return ttr;
@@ -622,7 +655,6 @@ impl Display {
             }
         }
     }
-
 }
 
 fn tile_addr(tile_id: u8, signed_mode: bool) -> u16 {
@@ -683,4 +715,3 @@ mod tests {
         assert_eq!(b64(got), "8FF0");
     }
 }
-
