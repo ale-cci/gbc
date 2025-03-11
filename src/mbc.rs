@@ -1,3 +1,6 @@
+use std::{fs::File, io::Read};
+use std::io::Write;
+
 pub trait Rom<'b> {
     fn get(&self, addr: u16) -> u8;
     fn set(&mut self, addr: u16, val: u8);
@@ -19,18 +22,30 @@ pub struct RomMBC3<'a> {
     rom_bank: u8,
     exram_enable: bool,
     bank_or_rtc: u8,
-    ram: Vec<Vec<u8>>,
+    ram: Vec<u8>,
 }
 
 impl RomMBC3<'_> {
     pub fn new<'a>(rom: &'a Vec<u8>) -> RomMBC3<'a> {
+        let mut ram = vec![0; 0x2000 * 4];
+
+        if let Ok(mut f) = File::open("file.sav") {
+            f.read_exact(&mut ram).unwrap();
+        }
+
         return RomMBC3 {
             rom,
             rom_bank: 1,
             exram_enable: false,
             bank_or_rtc: 0,
-            ram: vec![vec![0; 0x2000]; 4],
+            ram,
         };
+    }
+
+    fn flush(&mut self) {
+        let mut f = File::create("file.sav").unwrap();
+
+        f.write_all(&self.ram).unwrap();
     }
 }
 
@@ -62,7 +77,9 @@ impl Rom<'_> for RomMBC3<'_> {
             }
             0xA000..=0xBFFF => {
                 if self.bank_or_rtc <= 3 {
-                    self.ram[self.bank_or_rtc as usize][addr as usize - 0xA000] = val;
+                    let addr = (addr as usize - 0xA000) + self.bank_or_rtc as usize * 0x2000;
+                    self.ram[addr] = val;
+                    self.flush();
                 }
             }
             _ => {}
@@ -79,7 +96,8 @@ impl Rom<'_> for RomMBC3<'_> {
             0xA000..=0xBFFF => {
                 // select ram bank or the rtc_reg
                 if self.bank_or_rtc <= 3 {
-                    return self.ram[self.bank_or_rtc as usize][addr as usize - 0xA000];
+                    let addr = (addr as usize - 0xA000) + self.bank_or_rtc as usize * 0x2000;
+                    return self.ram[addr];
                 } else if self.bank_or_rtc >= 8 && self.bank_or_rtc <= 0x0C {
                 }
                 0
